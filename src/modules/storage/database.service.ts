@@ -151,6 +151,19 @@ export class DatabaseService {
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS paid_intent_leads (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        product_tier TEXT NOT NULL,
+        price_inr INTEGER NOT NULL,
+        property_id TEXT,
+        property_name TEXT,
+        buyer_contact TEXT NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -394,5 +407,130 @@ export class DatabaseService {
     const map: Record<string, number> = {};
     for (const r of rows) map[r.event_type] = Number(r.cnt);
     return map;
+  }
+
+  // --- Autonomous Paid-Intent & Traction Telemetry ---
+  recordPaidIntentLead(input: {
+    sessionId: string;
+    userId: string;
+    productTier: 'instant_dossier_4999' | 'advocate_title_14999' | 'nri_fema_desk_24999';
+    priceInr: number;
+    propertyId?: string;
+    propertyName?: string;
+    buyerContact: string;
+    notes?: string;
+  }) {
+    const id = `pay_${Date.now().toString(36).toUpperCase()}`;
+    const createdAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO paid_intent_leads (id, session_id, user_id, product_tier, price_inr, property_id, property_name, buyer_contact, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        input.sessionId,
+        input.userId,
+        input.productTier,
+        input.priceInr,
+        input.propertyId || null,
+        input.propertyName || null,
+        input.buyerContact,
+        input.notes || '',
+        createdAt
+      );
+    this.recordFunnelEvent(`paid_intent_${input.productTier}`, input.sessionId, undefined, input.propertyId);
+    return { id, ...input, createdAt };
+  }
+
+  getAutonomousTractionDashboard(corpusSize: number) {
+    const funnelCounts = this.getFunnelCounts();
+    const totalEvents = Object.values(funnelCounts).reduce((a, b) => a + b, 0);
+
+    const uniqueSessionsRow = this.db
+      .prepare('SELECT COUNT(DISTINCT session_id) as cnt FROM funnel_events')
+      .get() as { cnt: number } | undefined;
+    const uniqueChatSessionsRow = this.db
+      .prepare('SELECT COUNT(DISTINCT session_id) as cnt FROM audit_traces')
+      .get() as { cnt: number } | undefined;
+
+    const paidLeads = this.db
+      .prepare('SELECT * FROM paid_intent_leads ORDER BY created_at DESC LIMIT 25')
+      .all() as unknown as Array<{
+      id: string;
+      product_tier: string;
+      price_inr: number;
+      property_name: string;
+      buyer_contact: string;
+      created_at: string;
+    }>;
+
+    const bookingsCountRow = this.db
+      .prepare('SELECT COUNT(*) as cnt FROM viewing_bookings')
+      .get() as { cnt: number } | undefined;
+    const wishlistsCountRow = this.db
+      .prepare('SELECT COUNT(*) as cnt FROM saved_properties')
+      .get() as { cnt: number } | undefined;
+    const discoveredCountRow = this.db
+      .prepare('SELECT COUNT(*) as cnt FROM discovered_properties')
+      .get() as { cnt: number } | undefined;
+
+    const topQueries = this.db
+      .prepare('SELECT query, latency_ms, created_at FROM audit_traces ORDER BY created_at DESC LIMIT 8')
+      .all() as unknown as Array<{ query: string; latency_ms: number; created_at: string }>;
+
+    const paidRevenueIntentInr = paidLeads.reduce((acc, row) => acc + Number(row.price_inr || 0), 0);
+    const bookingsCount = Number(bookingsCountRow?.cnt || 0);
+    const wishlistsCount = Number(wishlistsCountRow?.cnt || 0);
+    const discoveredCount = Number(discoveredCountRow?.cnt || 0);
+    const uniqueSessions = Math.max(
+      1,
+      Number(uniqueSessionsRow?.cnt || 0) + Number(uniqueChatSessionsRow?.cnt || 0)
+    );
+
+    const toolUses =
+      (funnelCounts['true_cost_xray_used'] || 0) +
+      (funnelCounts['agreement_scanner_used'] || 0) +
+      (funnelCounts['live_neighborhood_audit'] || 0) +
+      (funnelCounts['registry_verifier_used'] || 0) +
+      (funnelCounts['comps_stack_used'] || 0);
+
+    // Autonomous PMF / Traction Score (0-100) based on real usage + paid intent + wishlist/booking conversion
+    const tractionScore = Math.min(
+      98,
+      Math.round(
+        25 +
+          Math.min(25, totalEvents * 1.8) +
+          Math.min(20, toolUses * 2.5) +
+          Math.min(15, (wishlistsCount + bookingsCount) * 4) +
+          Math.min(15, paidLeads.length * 7)
+      )
+    );
+
+    return {
+      autonomousMode: 'ACTIVE_24_7_ZERO_TOUCH',
+      tractionScore,
+      tractionVerdict:
+        tractionScore >= 75
+          ? 'STRONG_PAID_INTENT_SIGNAL'
+          : tractionScore >= 50
+            ? 'GROWING_ORGANIC_ENGAGEMENT'
+            : 'EARLY_BASELINE_COLLECTING',
+      metrics: {
+        uniqueSessions,
+        totalInteractions: totalEvents + topQueries.length,
+        toolAuditsExecuted: toolUses,
+        wishlistsSaved: wishlistsCount,
+        privateViewingsReserved: bookingsCount,
+        paidDossierCheckouts: paidLeads.length,
+        paidIntentRevenueInr: paidRevenueIntentInr,
+        autonomousOsmBuildingsIngested: discoveredCount,
+        totalSearchableBuildings: corpusSize,
+      },
+      funnelBreakdown: funnelCounts,
+      recentPaidIntentLeads: paidLeads,
+      recentUserSearches: topQueries,
+      cacheEfficiency: this.getCacheStats(),
+    };
   }
 }

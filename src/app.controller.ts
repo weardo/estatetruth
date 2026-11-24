@@ -399,4 +399,66 @@ export class AppController {
       totalIndexedProperties: this.search.getCorpus().length,
     };
   }
+
+  /**
+   * Competitor-Killer Tool 5: Registered Sub-Registrar / DLD Sale Deed Comps + Tower Stack View + Negotiation Script.
+   */
+  @Get('tools/comps-stack/:propertyId')
+  getCompsAndStack(@Param('propertyId') propertyId: string) {
+    const discovered = this.db.listDiscoveredProperties<any>();
+    for (const d of discovered) this.search.upsertResolvedEntity(d);
+    const prop = this.search.getCorpus().find((e) => e.id === propertyId) || this.search.getCorpus()[0];
+    this.db.recordFunnelEvent('comps_stack_used', 'tools_session', undefined, prop?.id);
+    return {
+      ok: true,
+      compsStack: this.buyerTools.getRegisteredCompsAndStack(prop),
+    };
+  }
+
+  /**
+   * Autonomous Paid-Intent Checkout & Demand Capture (Tests real Willingness-To-Pay without human intervention!).
+   */
+  @Post('traction/paid-intent')
+  recordPaidIntent(
+    @Body()
+    body: {
+      sessionId?: string;
+      userId?: string;
+      productTier?: 'instant_dossier_4999' | 'advocate_title_14999' | 'nri_fema_desk_24999';
+      priceInr?: number;
+      propertyId?: string;
+      propertyName?: string;
+      buyerContact?: string;
+      notes?: string;
+    }
+  ) {
+    const lead = this.db.recordPaidIntentLead({
+      sessionId: body.sessionId || 'autonomous_web_session',
+      userId: body.userId || 'hni_buyer',
+      productTier: body.productTier || 'instant_dossier_4999',
+      priceInr: Number(body.priceInr || 4999),
+      propertyId: body.propertyId,
+      propertyName: body.propertyName,
+      buyerContact: (body.buyerContact || '').trim() || 'anonymous_hni_intent',
+      notes: body.notes,
+    });
+    if (body.propertyId) {
+      this.db.unlockDossier(body.userId || 'hni_buyer', body.propertyId);
+    }
+    return { ok: true, lead };
+  }
+
+  /**
+   * Autonomous 24/7 Founder Traction, PMF Scorecard & Competitor Wedge Dashboard.
+   */
+  @Get('traction/dashboard')
+  getTractionDashboard() {
+    const discovered = this.db.listDiscoveredProperties<any>();
+    for (const d of discovered) this.search.upsertResolvedEntity(d);
+    return {
+      ok: true,
+      traction: this.db.getAutonomousTractionDashboard(this.search.getCorpus().length),
+      competitorMatrix: this.buyerTools.getCompetitorAuditMatrix(),
+    };
+  }
 }
