@@ -230,12 +230,12 @@ function EstateTruthMain() {
     {
       id: 'welcome',
       role: 'assistant',
-      text: 'Welcome to EstateTruth AI Advisor. Ask with strict dealbreakers — zero MahaRERA litigation, quiet night decibels, or step-free entry.',
+      text: 'Welcome to LensRoof Advisor. Tell me your preferred neighborhood, budget, and dealbreakers — zero RERA disputes, quiet nighttime decibels, or step-free entry.',
     },
   ]);
 
-  // 5 Live Integration Tools State
-  const [toolTab, setToolTab] = useState<'neighborhood' | 'registry' | 'cost' | 'scanner' | 'traction'>('neighborhood');
+  // 4 Buyer Verification Tools State
+  const [toolTab, setToolTab] = useState<'neighborhood' | 'registry' | 'cost' | 'scanner'>('neighborhood');
   const [envQuery, setEnvQuery] = useState('Pali Hill Bandra West Mumbai');
   const [envResult, setEnvResult] = useState<LiveNeighborhoodAudit | null>(null);
   const [envLoading, setEnvLoading] = useState(false);
@@ -504,11 +504,6 @@ function EstateTruthMain() {
       if (toolTab === 'neighborhood' && !envResult) runLiveNeighborhood();
       if (toolTab === 'registry' && !regResult) runRegistryVerify();
       if (toolTab === 'cost' && !costResult) runTrueCostAudit();
-      if (toolTab === 'traction') {
-        apiCall('/traction/dashboard', '/traction/dashboard').then((d) => {
-          if (d) setTractionData(d);
-        });
-      }
     }
   }, [activeTab, toolTab]);
 
@@ -536,7 +531,7 @@ function EstateTruthMain() {
             <Pressable
               onPress={() =>
                 Share.share({
-                  message: `EstateTruth Report — ${selectedProperty.canonicalName} (${selectedProperty.microMarket})\nScore: ${selectedProperty.truthScore}/100 | True Carpet: ${selectedProperty.trueCarpetSqFt} sq.ft | Night Noise: ${selectedProperty.ambientNoiseDbNight} dB\nhttps://demos.soupup.ai/estatetruth`,
+                  message: `LensRoof Report — ${selectedProperty.canonicalName} (${selectedProperty.microMarket})\nScore: ${selectedProperty.truthScore}/100 | True Carpet: ${selectedProperty.trueCarpetSqFt} sq.ft | Night Noise: ${selectedProperty.ambientNoiseDbNight} dB\nhttps://lensroof.com/property/${selectedProperty.id}`,
                 }).catch(() => {})
               }
               style={styles.circleBtn}
@@ -643,13 +638,21 @@ function EstateTruthMain() {
               </View>
             )}
 
-            {/* LIVE Satellite AQI, Weather & Map Telemetry */}
+            {/* GOOGLE MAPS & LIVE LOCATION TELEMETRY */}
             <View style={styles.grayCard}>
               <View style={styles.rowBetween}>
-                <Text style={styles.h3}>Live Location Telemetry</Text>
+                <Text style={styles.h3}>Google Maps &amp; Air Quality</Text>
                 {selectedLiveEnv && (
-                  <Pressable onPress={() => Linking.openURL(selectedLiveEnv.osmMapUrl)}>
-                    <Text style={styles.linkCoral}>Open Map →</Text>
+                  <Pressable
+                    onPress={() =>
+                      Linking.openURL(
+                        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          `${selectedProperty.canonicalName} ${selectedProperty.microMarket} ${selectedProperty.city}`
+                        )}`
+                      )
+                    }
+                  >
+                    <Text style={styles.linkCoral}>Open in Google Maps →</Text>
                   </Pressable>
                 )}
               </View>
@@ -680,7 +683,7 @@ function EstateTruthMain() {
                   </View>
                 </View>
               ) : (
-                <Text style={styles.caption}>Fetching live Open-Meteo satellite AQI &amp; OpenStreetMap data…</Text>
+                <Text style={styles.caption}>Loading Google Maps coordinates &amp; live AQI…</Text>
               )}
             </View>
 
@@ -823,14 +826,14 @@ function EstateTruthMain() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{ padding: 18, gap: 22, paddingBottom: 30 }}
             >
-              {/* Live Public OSM + Open-Meteo Building Ingestion Bar */}
+              {/* Consumer Neighborhood Explorer Bar */}
               <View style={styles.grayCard}>
                 <View style={styles.rowBetween}>
-                  <Text style={styles.h3}>{properties.length} Live &amp; Verified Buildings</Text>
-                  <Text style={styles.verifiedTag}>LIVE OSM + AQI</Text>
+                  <Text style={styles.h3}>{properties.length} Verified Homes</Text>
+                  <Text style={styles.verifiedTag}>LENSROOF VERIFIED</Text>
                 </View>
                 <Text style={styles.caption}>
-                  Tap a locality to pull &amp; index real residential apartment buildings from OpenStreetMap:
+                  Tap a neighborhood to add verified residential buildings:
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                   {['Juhu Mumbai', 'Malabar Hill Mumbai', 'Dubai Marina', 'Downtown Dubai'].map((loc) => (
@@ -920,8 +923,8 @@ function EstateTruthMain() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
           <View style={styles.screenHeader}>
-            <Text style={styles.h1}>AI Advisor</Text>
-            <Text style={styles.caption}>Live Gemini 4 · Hybrid RRF Search</Text>
+            <Text style={styles.h1}>LensRoof Advisor</Text>
+            <Text style={styles.caption}>Independent Buyer Concierge</Text>
           </View>
 
           <ScrollView contentContainerStyle={{ padding: 18, gap: 14 }}>
@@ -992,8 +995,8 @@ function EstateTruthMain() {
       {activeTab === 'tools' && (
         <View style={{ flex: 1 }}>
           <View style={styles.screenHeader}>
-            <Text style={styles.h1}>Live Tools</Text>
-            <Text style={styles.caption}>OSM · Open-Meteo AQI · Live FX · MahaRERA/DLD</Text>
+            <Text style={styles.h1}>Buyer Tools</Text>
+            <Text style={styles.caption}>Google Maps · Air Quality · RERA/DLD · Cost &amp; Clauses</Text>
           </View>
 
           <ScrollView
@@ -1003,11 +1006,10 @@ function EstateTruthMain() {
             contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 10, gap: 8 }}
           >
             {[
-              { id: 'neighborhood', label: '1. Live AQI & Map' },
+              { id: 'neighborhood', label: '1. Google Maps & AQI' },
               { id: 'registry', label: '2. RERA / DLD' },
-              { id: 'cost', label: '3. Cost X-Ray' },
-              { id: 'scanner', label: '4. Clause Scan' },
-              { id: 'traction', label: '5. Traction & SEO' },
+              { id: 'cost', label: '3. True Cost' },
+              { id: 'scanner', label: '4. Clause Scanner' },
             ].map((t) => {
               const active = toolTab === t.id;
               return (
@@ -1049,9 +1051,15 @@ function EstateTruthMain() {
                 {envResult && (
                   <View style={styles.card}>
                     <View style={styles.rowBetween}>
-                      <Text style={styles.verifiedTag}>LIVE · {envResult.latencyMs}ms</Text>
-                      <Pressable onPress={() => Linking.openURL(envResult.osmMapUrl)}>
-                        <Text style={styles.linkCoral}>Open Map →</Text>
+                      <Text style={styles.verifiedTag}>VERIFIED · {envResult.lat}, {envResult.lng}</Text>
+                      <Pressable
+                        onPress={() =>
+                          Linking.openURL(
+                            `https://www.google.com/maps/search/?api=1&query=${envResult.lat},${envResult.lng}`
+                          )
+                        }
+                      >
+                        <Text style={styles.linkCoral}>Open in Google Maps →</Text>
                       </Pressable>
                     </View>
                     <Text style={styles.h3}>{envResult.resolvedAddress}</Text>
@@ -1234,7 +1242,6 @@ function EstateTruthMain() {
                       <Text style={styles.dangerBadge}>
                         {scanResult.verdict.replace(/_/g, ' ')} · {scanResult.riskScore}/100
                       </Text>
-                      <Text style={styles.caption}>{scanResult.latencyMs}ms</Text>
                     </View>
                     <Text style={styles.body}>{scanResult.executiveSummary}</Text>
                     {scanResult.redFlags.map((f, i) => (
@@ -1247,34 +1254,6 @@ function EstateTruthMain() {
                   </View>
                 )}
               </>
-            )}
-
-            {/* TOOL 5: AUTONOMOUS TRACTION, GOOGLE SEO & COMPETITOR MATRIX */}
-            {toolTab === 'traction' && (
-              <View style={styles.card}>
-                <Text style={styles.verifiedTag}>AUTONOMOUS 24/7 ENGINE · LIVE TELEMETRY</Text>
-                <Text style={styles.h2}>
-                  Traction Score: {tractionData?.traction?.tractionScore ?? 68}/100
-                </Text>
-                <Text style={styles.caption}>
-                  Sessions: {tractionData?.traction?.metrics?.uniqueSessions ?? 1} · Indexed Buildings:{' '}
-                  {tractionData?.traction?.metrics?.totalSearchableBuildings ?? properties.length} · Paid Dossier Intent: ₹
-                  {(tractionData?.traction?.metrics?.paidIntentRevenueInr ?? 0).toLocaleString()}
-                </Text>
-                <Pressable
-                  onPress={() => Linking.openURL('https://lensroof.com/sitemap.xml')}
-                  style={styles.darkBtnFull}
-                >
-                  <Text style={styles.rauschBtnTxt}>Open Google SEO Sitemap (lensroof.com/sitemap.xml) →</Text>
-                </Pressable>
-                {(tractionData?.competitorMatrix || []).map((c: any, idx: number) => (
-                  <View key={idx} style={styles.grayCard}>
-                    <Text style={styles.h3}>{c.competitor}</Text>
-                    <Text style={styles.dangerBadge}>Gap: {c.userPainPointOnReddit}</Text>
-                    <Text style={styles.verifiedTag}>Wedge: {c.estateTruthAdvantage}</Text>
-                  </View>
-                ))}
-              </View>
             )}
           </ScrollView>
         </View>

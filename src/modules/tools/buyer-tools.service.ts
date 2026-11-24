@@ -88,6 +88,10 @@ export interface LiveNeighborhoodAudit {
     distanceMeters: number;
   }>;
   estimatedNightNoiseDb: number;
+  googleMapsUrl?: string;
+  googleMapsEmbedUrl?: string;
+  googleMapsSatelliteEmbedUrl?: string;
+  googleDirectionsUrl?: string;
   osmMapUrl: string;
   osmEmbedUrl: string;
   liveSourcesUsed: string[];
@@ -643,6 +647,10 @@ ${raw.slice(0, 3500)}
     );
 
     const bbox = `${(lng - 0.008).toFixed(5)},${(lat - 0.006).toFixed(5)},${(lng + 0.008).toFixed(5)},${(lat + 0.006).toFixed(5)}`;
+    const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(5)},${lng.toFixed(5)}`;
+    const googleMapsEmbedUrl = `https://maps.google.com/maps?q=${lat.toFixed(5)},${lng.toFixed(5)}&hl=en&z=16&output=embed`;
+    const googleMapsSatelliteEmbedUrl = `https://maps.google.com/maps?q=${lat.toFixed(5)},${lng.toFixed(5)}&hl=en&z=17&t=k&output=embed`;
+    const googleDirectionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat.toFixed(5)},${lng.toFixed(5)}`;
     const result: LiveNeighborhoodAudit = {
       query: cleanQ,
       resolvedAddress,
@@ -654,8 +662,12 @@ ${raw.slice(0, 3500)}
       airQuality: { usAqi, pm25, pm10, no2, category },
       nearbyInfrastructure,
       estimatedNightNoiseDb,
-      osmMapUrl: `https://www.openstreetmap.org/?mlat=${lat.toFixed(5)}&mlon=${lng.toFixed(5)}#map=16/${lat.toFixed(5)}/${lng.toFixed(5)}`,
-      osmEmbedUrl: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(5)},${lng.toFixed(5)}`,
+      googleMapsUrl,
+      googleMapsEmbedUrl,
+      googleMapsSatelliteEmbedUrl,
+      googleDirectionsUrl,
+      osmMapUrl: googleMapsUrl,
+      osmEmbedUrl: googleMapsEmbedUrl,
       liveSourcesUsed,
       latencyMs: Date.now() - t0,
     };

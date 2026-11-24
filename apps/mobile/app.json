@@ -1,22 +1,22 @@
 {
   "expo": {
-    "name": "EstateTruth AI",
-    "slug": "estatetruth-ai",
+    "name": "LensRoof",
+    "slug": "lensroof",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#070709",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#FFFFFF",
     "splash": {
-      "backgroundColor": "#070709"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "ai.soupup.estatetruth"
+      "bundleIdentifier": "com.lensroof.app"
     },
     "android": {
-      "package": "ai.soupup.estatetruth",
+      "package": "com.lensroof.app",
       "adaptiveIcon": {
-        "backgroundColor": "#070709"
+        "backgroundColor": "#FFFFFF"
       }
     }
   }
