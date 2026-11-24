@@ -133,7 +133,103 @@ export class DatabaseService {
         property_id TEXT,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS api_cache (
+        cache_key TEXT PRIMARY KEY,
+        category TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        hit_count INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS discovered_properties (
+        id TEXT PRIMARY KEY,
+        canonical_name TEXT NOT NULL,
+        city TEXT NOT NULL,
+        micro_market TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
     `);
+  }
+
+  // --- Multi-Tier L2 Persistent SQLite Cache ---
+  getCached<T>(key: string): T | null {
+    try {
+      const row = this.db
+        .prepare('SELECT payload_json, expires_at FROM api_cache WHERE cache_key = ?')
+        .get(key) as { payload_json: string; expires_at: number } | undefined;
+      if (!row) return null;
+      if (Date.now() > Number(row.expires_at)) {
+        this.db.prepare('DELETE FROM api_cache WHERE cache_key = ?').run(key);
+        return null;
+      }
+      this.db.prepare('UPDATE api_cache SET hit_count = hit_count + 1 WHERE cache_key = ?').run(key);
+      return JSON.parse(row.payload_json) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  setCached(key: string, category: string, payload: unknown, ttlSeconds: number) {
+    try {
+      const now = Date.now();
+      const expiresAt = now + ttlSeconds * 1000;
+      this.db
+        .prepare(
+          `INSERT INTO api_cache (cache_key, category, payload_json, created_at, expires_at, hit_count)
+           VALUES (?, ?, ?, ?, ?, 0)
+           ON CONFLICT(cache_key) DO UPDATE SET
+             payload_json = excluded.payload_json,
+             created_at = excluded.created_at,
+             expires_at = excluded.expires_at`
+        )
+        .run(key, category, JSON.stringify(payload), now, expiresAt);
+    } catch {
+      // ignore
+    }
+  }
+
+  getCacheStats() {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT category, COUNT(*) as entries, COALESCE(SUM(hit_count), 0) as total_hits
+           FROM api_cache WHERE expires_at > ? GROUP BY category`
+        )
+        .all(Date.now()) as unknown as Array<{ category: string; entries: number; total_hits: number }>;
+      const totalEntries = rows.reduce((a, r) => a + Number(r.entries), 0);
+      const totalHits = rows.reduce((a, r) => a + Number(r.total_hits), 0);
+      return { totalEntries, totalHits, byCategory: rows };
+    } catch {
+      return { totalEntries: 0, totalHits: 0, byCategory: [] };
+    }
+  }
+
+  // --- Live Discovered Real Properties (OpenStreetMap + Open-Meteo + RERA/DLD Ingestion) ---
+  saveDiscoveredProperty(prop: { id: string; canonicalName: string; city: string; microMarket: string } & Record<string, unknown>) {
+    try {
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO discovered_properties (id, canonical_name, city, micro_market, payload_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(prop.id, prop.canonicalName, prop.city, prop.microMarket, JSON.stringify(prop), new Date().toISOString());
+    } catch {
+      // ignore
+    }
+  }
+
+  listDiscoveredProperties<T>(): T[] {
+    try {
+      const rows = this.db
+        .prepare('SELECT payload_json FROM discovered_properties ORDER BY created_at DESC LIMIT 100')
+        .all() as unknown as Array<{ payload_json: string }>;
+      return rows.map((r) => JSON.parse(r.payload_json) as T);
+    } catch {
+      return [];
+    }
   }
 
   // --- Saved Shortlist ---

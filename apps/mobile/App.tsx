@@ -256,6 +256,9 @@ function EstateTruthMain() {
   const [scanResult, setScanResult] = useState<AgreementScanResult | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
 
+  const [discoverBusy, setDiscoverBusy] = useState(false);
+  const [discoverMsg, setDiscoverMsg] = useState('');
+
   // Android Hardware Back Button Handling (Prevents accidental app exit!)
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -278,10 +281,13 @@ function EstateTruthMain() {
 
   const apiCall = async (lanPath: string, edgePath: string, init?: RequestInit) => {
     try {
-      const res = await fetch(`${API_BASE_LAN}${lanPath}`, init);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`${API_BASE_LAN}${lanPath}`, { ...init, signal: controller.signal });
+      clearTimeout(timer);
       if (res.ok) return await res.json();
     } catch {
-      // fallback to Cloudflare Edge
+      // fast fallback to Cloudflare Edge if LAN times out
     }
     try {
       const res = await fetch(`${API_EDGE_BASE}${edgePath}`, init);
@@ -290,6 +296,24 @@ function EstateTruthMain() {
       // ignore
     }
     return null;
+  };
+
+  const triggerLiveDiscovery = async (locality: string) => {
+    if (discoverBusy) return;
+    setDiscoverBusy(true);
+    setDiscoverMsg(`Ingesting live OpenStreetMap buildings in ${locality}…`);
+    const res = await apiCall('/properties/discover-live', '/properties/discover-live', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locality }),
+    });
+    if (res?.discovered?.length) {
+      setDiscoverMsg(`Added ${res.discovered.length} real OSM buildings in ${locality}`);
+      await fetchFeed(cityFilter, safeOnly);
+    } else {
+      setDiscoverMsg(`Checked ${locality}`);
+    }
+    setDiscoverBusy(false);
   };
 
   const formatPrice = (croreInr: number): string => {
@@ -763,8 +787,32 @@ function EstateTruthMain() {
           ) : (
             <ScrollView
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ padding: 18, gap: 26, paddingBottom: 30 }}
+              contentContainerStyle={{ padding: 18, gap: 22, paddingBottom: 30 }}
             >
+              {/* Live Public OSM + Open-Meteo Building Ingestion Bar */}
+              <View style={styles.grayCard}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.h3}>{properties.length} Live &amp; Verified Buildings</Text>
+                  <Text style={styles.verifiedTag}>LIVE OSM + AQI</Text>
+                </View>
+                <Text style={styles.caption}>
+                  Tap a locality to pull &amp; index real residential apartment buildings from OpenStreetMap:
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                  {['Juhu Mumbai', 'Malabar Hill Mumbai', 'Dubai Marina', 'Downtown Dubai'].map((loc) => (
+                    <Pressable
+                      key={loc}
+                      onPress={() => triggerLiveDiscovery(loc)}
+                      disabled={discoverBusy}
+                      style={styles.toolChip}
+                    >
+                      <Text style={styles.toolChipTxt}>+ {loc}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                {discoverMsg ? <Text style={styles.verifiedTag}>{discoverMsg}</Text> : null}
+              </View>
+
               {properties.map((prop) => {
                 const isDisputed = prop.activeReraLitigations > 0 || prop.truthScore < 60;
                 const isSaved = savedIds.includes(prop.id);

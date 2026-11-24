@@ -1,4 +1,5 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { DatabaseService } from '../storage/database.service';
 
 export interface LiveGeoContext {
   areaName: string;
@@ -21,11 +22,18 @@ export class LiveGeoService {
   private readonly logger = new Logger(LiveGeoService.name);
   private readonly cache = new Map<string, { data: LiveGeoContext; ts: number }>();
 
+  constructor(@Optional() private readonly db?: DatabaseService) {}
+
   async lookupNeighborhoodContext(areaName: string, fallbackLat: number, fallbackLng: number): Promise<LiveGeoContext> {
     const key = areaName.trim().toLowerCase();
     const cached = this.cache.get(key);
-    if (cached && Date.now() - cached.ts < 1000 * 60 * 30) {
+    if (cached && Date.now() - cached.ts < 1000 * 60 * 60 * 24) {
       return cached.data;
+    }
+    const l2 = this.db?.getCached<LiveGeoContext>(`geo_anchor:${key}`);
+    if (l2) {
+      this.cache.set(key, { data: l2, ts: Date.now() });
+      return l2;
     }
 
     if (process.env.SKIP_LIVE_LLM === '1') {
@@ -43,7 +51,7 @@ export class LiveGeoService {
 
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3200);
+      const timer = setTimeout(() => controller.abort(), 1400);
       const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(areaName)}`;
       const res = await fetch(url, {
         headers: { 'User-Agent': 'EstateTruthAI/1.0 (https://demos.soupup.ai/estatetruth)' },
@@ -68,6 +76,7 @@ export class LiveGeoService {
             estimatedAcousticRisk: isNoisyPocket ? 'High Traffic Zone' : 'Quiet Sanctuary',
           };
           this.cache.set(key, { data, ts: Date.now() });
+          this.db?.setCached(`geo_anchor:${key}`, 'osm_geocode_poi', data, 604800);
           return data;
         }
       }
@@ -86,6 +95,7 @@ export class LiveGeoService {
       estimatedAcousticRisk: 'Quiet Sanctuary',
     };
     this.cache.set(key, { data: fallback, ts: Date.now() });
+    this.db?.setCached(`geo_anchor:${key}`, 'osm_geocode_poi', fallback, 86400);
     return fallback;
   }
 }

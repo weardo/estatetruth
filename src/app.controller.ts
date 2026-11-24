@@ -28,7 +28,9 @@ export class AppController {
       ok: true,
       service: 'EstateTruth AI — Luxury Real Estate Forensics & MLOps Platform',
       liveGeminiConnected: this.llm.isLiveReady(),
+      llmCircuitStatus: this.llm.getCircuitStatus(),
       sqlitePersistence: true,
+      cacheStats: this.db.getCacheStats(),
       corpusSize: this.search.getCorpus().length,
       timestamp: new Date().toISOString(),
     };
@@ -36,6 +38,7 @@ export class AppController {
 
   /**
    * Consumer Home Feed: Browse all verified luxury residences with clean filtering (Mumbai / Dubai / Safe Only).
+   * Automatically merges any real buildings discovered & persisted via Live OpenStreetMap Ingestion!
    */
   @Get('properties')
   listProperties(
@@ -43,6 +46,12 @@ export class AppController {
     @Query('safeOnly') safeOnly?: string,
     @Query('userId') userId = 'guest_hni'
   ) {
+    // Hydrate any persisted live-discovered OSM properties into the active search corpus
+    const discovered = this.db.listDiscoveredProperties<any>();
+    for (const d of discovered) {
+      this.search.upsertResolvedEntity(d);
+    }
+
     const savedIds = new Set(this.db.listSavedProperties(userId).map((r) => r.property_id));
     const unlockedIds = new Set(this.db.listUnlockedDossiers(userId));
 
@@ -354,5 +363,40 @@ export class AppController {
   async getFxRates() {
     const rates = await this.buyerTools.getLiveFxRates();
     return { ok: true, rates };
+  }
+
+  /**
+   * Live Integration 4: Automated OpenStreetMap + Open-Meteo Public Building Discovery & Ingestion Pipeline.
+   * Discovers real residential apartment buildings in ANY locality, enriches with live AQI & RERA/DLD district codes,
+   * persists to SQLite, and indexes them into HybridSearchService immediately.
+   */
+  @Post('properties/discover-live')
+  async discoverLiveProperties(@Body() body: { locality?: string }) {
+    const locality = (body.locality || 'Bandra West Mumbai').trim();
+    const discovered = await this.buyerTools.discoverLiveBuildingsFromOsm(locality);
+    for (const prop of discovered) {
+      this.search.upsertResolvedEntity(prop as any);
+    }
+    this.db.recordFunnelEvent('live_osm_building_discovery', 'ingestion_session');
+    return {
+      ok: true,
+      locality,
+      ingestedCount: discovered.length,
+      totalCorpusSize: this.search.getCorpus().length,
+      discovered,
+    };
+  }
+
+  /**
+   * Multi-Tier L1/L2 Cache & Circuit Breaker Telemetry Endpoint.
+   */
+  @Get('cache/stats')
+  getCacheStats() {
+    return {
+      ok: true,
+      cache: this.db.getCacheStats(),
+      llmCircuit: this.llm.getCircuitStatus(),
+      totalIndexedProperties: this.search.getCorpus().length,
+    };
   }
 }

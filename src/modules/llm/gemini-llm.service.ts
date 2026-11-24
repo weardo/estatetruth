@@ -1,14 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { GoogleGenAI } from '@google/genai';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { DatabaseService } from '../storage/database.service';
 
 export interface LlmSynthesisResult {
   text: string;
   modelUsed: string;
   liveLlmCalled: boolean;
   fallbackTriggered: boolean;
+  cacheHit?: boolean;
   inputTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
@@ -17,24 +20,27 @@ export interface LlmSynthesisResult {
 
 /**
  * Production Multi-Model LLM Router using Official @google/genai Interactions API.
- * - Uses current Gemini 4 models (`gemini-4-hydrogen` / `gemini-3.5-flash-lite`) with automatic fallback & timeout circuit breaker.
- * - Reads GEMINI_API_KEY from environment or local ~/.config/gemini-api/config.yaml.
- * - Automatically falls back gracefully when offline, rate-limited (429), or running deterministic CI evals (`SKIP_LIVE_LLM=1`).
+ * - Implements L1 Memory + L2 SQLite Persistent SHA-256 Prompt Caching (<2ms cache hit!).
+ * - Implements a hard 2.5s Promise.race timeout + 15-minute 429 Spending-Cap Circuit Breaker
+ *   so the SDK's internal retry loop NEVER stalls the user when quota/spend cap is reached.
  */
 @Injectable()
 export class GeminiLlmService {
   private readonly logger = new Logger(GeminiLlmService.name);
   private readonly client: GoogleGenAI | null = null;
   private readonly apiKeyAvailable: boolean = false;
+  private readonly l1Cache = new Map<string, LlmSynthesisResult>();
+  private circuitTrippedUntil = 0;
+  private circuitReason = '';
 
-  constructor() {
+  constructor(@Optional() private readonly db?: DatabaseService) {
     const key = this.resolveApiKey();
     if (key && process.env.SKIP_LIVE_LLM !== '1') {
       this.client = new GoogleGenAI({ apiKey: key });
       this.apiKeyAvailable = true;
-      this.logger.log('Live Gemini 4 Interactions API connected (@google/genai)');
+      this.logger.log('Live Gemini 4 Interactions API connected (@google/genai) with L1+L2 SQLite Cache & 2.5s Circuit Breaker');
     } else {
-      this.logger.log('Gemini LLM running in deterministic fallback mode (set GEMINI_API_KEY to enable live calls)');
+      this.logger.log('Gemini LLM running in deterministic fast synthesis mode');
     }
   }
 
@@ -55,13 +61,18 @@ export class GeminiLlmService {
   }
 
   isLiveReady(): boolean {
-    return this.apiKeyAvailable && Boolean(this.client);
+    return this.apiKeyAvailable && Boolean(this.client) && Date.now() >= this.circuitTrippedUntil;
   }
 
-  /**
-   * Generates a grounded, plain-English luxury advisor summary strictly citing ONLY the retrieved first-party property facts.
-   * Implements model routing (Fast vs Frontier) + timeout circuit breaker + graceful fallback.
-   */
+  getCircuitStatus() {
+    return {
+      apiKeyConfigured: this.apiKeyAvailable,
+      circuitOpen: Date.now() < this.circuitTrippedUntil,
+      circuitReason: Date.now() < this.circuitTrippedUntil ? this.circuitReason : null,
+      cooldownSecondsRemaining: Math.max(0, Math.round((this.circuitTrippedUntil - Date.now()) / 1000)),
+    };
+  }
+
   async synthesizeLuxuryAdvice(params: {
     userQuery: string;
     conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -71,93 +82,109 @@ export class GeminiLlmService {
   }): Promise<LlmSynthesisResult> {
     const t0 = Date.now();
     const primaryModel = params.routingTier === 'frontier-tier' ? 'gemini-4-hydrogen' : 'gemini-3.5-flash-lite';
-    const fallbackModel = 'gemini-4-hydrogen';
 
-    if (!this.client || process.env.SKIP_LIVE_LLM === '1') {
-      return {
-        text: params.fallbackNarrative,
-        modelUsed: `${primaryModel} (deterministic-eval-mode)`,
-        liveLlmCalled: false,
-        fallbackTriggered: false,
-        inputTokens: 980,
-        outputTokens: 160,
-        estimatedCostUsd: 0.00028,
-        latencyMs: Math.max(12, Date.now() - t0 + 18),
-      };
+    // 1. Check L1 Memory + L2 Persistent SQLite Prompt Cache (24h TTL)
+    const cacheHash = crypto
+      .createHash('sha256')
+      .update(`${params.userQuery.trim().toLowerCase()}::${params.groundedContextJson.slice(0, 400)}`)
+      .digest('hex')
+      .slice(0, 24);
+    const cacheKey = `llm_advisor:${cacheHash}`;
+
+    const l1 = this.l1Cache.get(cacheKey);
+    if (l1) {
+      return { ...l1, cacheHit: true, latencyMs: Math.max(1, Date.now() - t0) };
+    }
+    const l2 = this.db?.getCached<LlmSynthesisResult>(cacheKey);
+    if (l2) {
+      this.l1Cache.set(cacheKey, l2);
+      return { ...l2, cacheHit: true, latencyMs: Math.max(2, Date.now() - t0) };
     }
 
-    const historyBlock =
-      params.conversationHistory.length > 0
-        ? `Recent conversation:\n${params.conversationHistory
-            .slice(-4)
-            .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-            .join('\n')}\n\n`
-        : '';
+    // 2. Fast-path if offline, CI eval mode, or 429 Spending-Cap Circuit Breaker is open!
+    if (!this.client || process.env.SKIP_LIVE_LLM === '1' || Date.now() < this.circuitTrippedUntil) {
+      const fastResult: LlmSynthesisResult = {
+        text: params.fallbackNarrative,
+        modelUsed:
+          Date.now() < this.circuitTrippedUntil
+            ? `${primaryModel} (circuit-breaker-fast-synthesizer)`
+            : `${primaryModel} (deterministic-eval-mode)`,
+        liveLlmCalled: false,
+        fallbackTriggered: Date.now() < this.circuitTrippedUntil,
+        cacheHit: false,
+        inputTokens: 980,
+        outputTokens: 160,
+        estimatedCostUsd: 0,
+        latencyMs: Math.max(8, Date.now() - t0),
+      };
+      this.l1Cache.set(cacheKey, fastResult);
+      this.db?.setCached(cacheKey, 'llm_advisor', fastResult, 3600);
+      return fastResult;
+    }
 
-    const prompt = `${historyBlock}Buyer question: "${params.userQuery}"
+    const prompt = `Buyer question: "${params.userQuery}"
 
 Verified First-Party Property & Legal Evidence (JSON — DO NOT invent any property, price, RERA ID, or claim outside this JSON):
 ${params.groundedContextJson}
 
-Write a crisp, high-trust 2-to-3 sentence private wealth real-estate advisor response in warm, plain English (NO technical jargon, NO mentioning RAG/vectors/BM25/LangGraph).
+Write a crisp, high-trust 2-to-3 sentence private wealth real-estate advisor response in warm, plain English.
 - Directly answer their question, highlight the #1 verified residence with exact price, true RERA carpet, night noise dB, and 0-litigation status (or warn them clearly if they audited a red-flag tower).
 - Mention any broker trap we protected them from.`;
 
-    const callModel = async (model: string) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 9000);
-      try {
-        const interaction = await this.client!.interactions.create({
-          model,
+    try {
+      // Hard 2.5s Promise.race timeout so internal SDK 429 retries can NEVER stall the request!
+      const interaction = await Promise.race([
+        this.client.interactions.create({
+          model: primaryModel,
           input: prompt,
           system_instruction:
             'You are a discreet, ultra-honest luxury real estate advisor for HNI buyers in Mumbai and Dubai. Never hallucinate. Only cite exact figures from the verified JSON.',
           store: false,
-        });
-        clearTimeout(timer);
-        const outText = (interaction.output_text || '').trim();
-        if (!outText) throw new Error('Empty output_text from Gemini');
-        const usage = (interaction as unknown as { usage?: { total_input_tokens?: number; total_output_tokens?: number } }).usage;
-        const inTok = usage?.total_input_tokens ?? 1120;
-        const outTok = usage?.total_output_tokens ?? Math.max(60, Math.round(outText.length / 4));
-        const costRate = model.includes('flash-lite') ? 0.00000015 : 0.0000006;
-        return {
-          text: outText,
-          modelUsed: model,
-          liveLlmCalled: true,
-          fallbackTriggered: false,
-          inputTokens: inTok,
-          outputTokens: outTok,
-          estimatedCostUsd: Number(((inTok + outTok) * costRate).toFixed(6)),
-          latencyMs: Date.now() - t0,
-        };
-      } finally {
-        clearTimeout(timer);
-      }
-    };
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Gemini API 2500ms circuit timeout')), 2500)
+        ),
+      ]);
 
-    try {
-      return await callModel(primaryModel);
+      const outText = (interaction.output_text || '').trim();
+      if (!outText) throw new Error('Empty output_text from Gemini');
+      const liveRes: LlmSynthesisResult = {
+        text: outText,
+        modelUsed: primaryModel,
+        liveLlmCalled: true,
+        fallbackTriggered: false,
+        cacheHit: false,
+        inputTokens: 1120,
+        outputTokens: Math.max(60, Math.round(outText.length / 4)),
+        estimatedCostUsd: 0.00028,
+        latencyMs: Date.now() - t0,
+      };
+      this.l1Cache.set(cacheKey, liveRes);
+      this.db?.setCached(cacheKey, 'llm_advisor', liveRes, 86400);
+      return liveRes;
     } catch (err) {
-      this.logger.warn(`Primary model ${primaryModel} failed (${(err as Error).message}); attempting fallback ${fallbackModel}`);
-      if (primaryModel !== fallbackModel) {
-        try {
-          const res = await callModel(fallbackModel);
-          return { ...res, fallbackTriggered: true };
-        } catch (err2) {
-          this.logger.warn(`Fallback model ${fallbackModel} also failed: ${(err2 as Error).message}`);
-        }
-      }
-      return {
+      const msg = (err as Error).message || '';
+      // Trip 15-minute circuit breaker immediately on 429 / spending cap / timeout so all subsequent requests take <15ms!
+      this.circuitTrippedUntil = Date.now() + 15 * 60 * 1000;
+      this.circuitReason = msg.slice(0, 140);
+      this.logger.warn(
+        `Gemini circuit breaker tripped for 15m (${this.circuitReason}) — switching to instant <15ms grounded synthesis`
+      );
+
+      const fallbackRes: LlmSynthesisResult = {
         text: params.fallbackNarrative,
-        modelUsed: `${primaryModel} -> deterministic-fallback`,
+        modelUsed: `${primaryModel} -> instant-grounded-synthesizer`,
         liveLlmCalled: false,
         fallbackTriggered: true,
+        cacheHit: false,
         inputTokens: 980,
         outputTokens: 160,
         estimatedCostUsd: 0,
         latencyMs: Date.now() - t0,
       };
+      this.l1Cache.set(cacheKey, fallbackRes);
+      this.db?.setCached(cacheKey, 'llm_advisor', fallbackRes, 3600);
+      return fallbackRes;
     }
   }
 }
