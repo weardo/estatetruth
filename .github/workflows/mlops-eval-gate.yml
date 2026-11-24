@@ -1,0 +1,29 @@
+name: MLOps Eval & Regression Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mlops-regression-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Strict TypeScript Typecheck & Build
+        run: npm run typecheck && npm run build
+
+      - name: Run Golden Dataset Relevance & LLM-as-Judge CI Gate (Blocks Merge if Faithfulness < 0.90 or NDCG Regresses)
+        run: npm run eval:ci

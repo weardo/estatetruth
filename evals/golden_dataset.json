@@ -1,0 +1,98 @@
+[
+  {
+    "id": "eval-01",
+    "category": "negation_rera_worli",
+    "query": "Sea-facing 4BHK in Worli under 40 Cr, zero MahaRERA litigation, no metro construction noise, private elevator",
+    "expectedTopIds": ["est-lodha-seaface-worli"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-02",
+    "category": "quiet_bandra_no_highway",
+    "query": "Quietest 4BHK in Pali Hill Bandra West, no highway noise, no metro drilling, OC received, private lift",
+    "expectedTopIds": ["est-pali-hill-serene-bandra"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-03",
+    "category": "negation_no_dogs_trap",
+    "query": "Quiet sea view luxury residence in Mumbai under 50 Cr, NO dogs allowed in lobby, zero RERA litigation",
+    "expectedTopIds": ["est-lodha-seaface-worli", "est-malabar-hill-heritage"],
+    "forbiddenIds": ["est-pali-hill-serene-bandra", "est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-04",
+    "category": "dubai_no_party_no_dj",
+    "query": "Ultra-luxury beachfront residence in Dubai with private elevator, NO loud DJ party clubs, NO Airbnb tourists, zero DLD disputes",
+    "expectedTopIds": ["est-palm-jumeirah-orla"],
+    "forbiddenIds": ["est-dubai-marina-party-trap"],
+    "expectedCity": "Dubai"
+  },
+  {
+    "id": "eval-05",
+    "category": "wheelchair_accessibility_vision",
+    "query": "Step-free wheelchair accessible 4BHK sea view in South Mumbai with OC received and zero litigation",
+    "expectedTopIds": ["est-lodha-seaface-worli", "est-malabar-hill-heritage", "est-three-sixty-west-worli"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-06",
+    "category": "entity_resolution_alias",
+    "query": "Forensic audit of 360 West Worli — verify OC and Ritz Carlton hospitality",
+    "expectedTopIds": ["est-three-sixty-west-worli"],
+    "forbiddenIds": [],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-07",
+    "category": "forensic_red_flag_audit",
+    "query": "Is Imperial Crown Heights Lower Parel safe? Check RERA litigation and noise",
+    "expectedTopIds": ["est-lower-parel-skyline-trap"],
+    "forbiddenIds": [],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-08",
+    "category": "carpet_area_minimum",
+    "query": "Need over 4000 sq ft true RERA carpet sea-facing apartment in Malabar Hill or Worli, no highway noise, zero litigation",
+    "expectedTopIds": ["est-malabar-hill-heritage", "est-three-sixty-west-worli"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap", "est-bkc-private-suites"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-09",
+    "category": "bkc_cxo_commute",
+    "query": "Walk to BKC financial district executive 4BHK under 25 Cr, OC received, private elevator lobby, zero litigation",
+    "expectedTopIds": ["est-bkc-private-suites"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-10",
+    "category": "dubai_entity_alias",
+    "query": "Audit Omniyat Orla Dubai escrow status and night noise level",
+    "expectedTopIds": ["est-palm-jumeirah-orla"],
+    "forbiddenIds": ["est-dubai-marina-party-trap"],
+    "expectedCity": "Dubai"
+  },
+  {
+    "id": "eval-11",
+    "category": "malabar_crz_protected_sea",
+    "query": "Unobstructed Arabian Sea view in Malabar Hill under 55 Cr, ultra quiet sanctuary, no highway noise, OC received",
+    "expectedTopIds": ["est-malabar-hill-heritage"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  },
+  {
+    "id": "eval-12",
+    "category": "no_delays_strict",
+    "query": "Ready to move OC received 4BHK in Mumbai under 36 Cr with sea view, NO delays, NO litigation, NO metro drilling",
+    "expectedTopIds": ["est-lodha-seaface-worli"],
+    "forbiddenIds": ["est-lower-parel-skyline-trap"],
+    "expectedCity": "Mumbai"
+  }
+]
