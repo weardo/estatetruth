@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DatabaseService } from '../storage/database.service';
+import { loadLensRoofSkillPrompt } from './lensroof-skills';
 
 export interface LlmSynthesisResult {
   text: string;
@@ -137,8 +138,7 @@ Write a crisp, high-trust 2-to-3 sentence private wealth real-estate advisor res
         this.client.interactions.create({
           model: primaryModel,
           input: prompt,
-          system_instruction:
-            'You are a discreet, ultra-honest luxury real estate advisor for HNI buyers in Mumbai and Dubai. Never hallucinate. Only cite exact figures from the verified JSON.',
+          system_instruction: loadLensRoofSkillPrompt('real-estate-due-diligence'),
           store: false,
         }),
         new Promise<never>((_, reject) =>

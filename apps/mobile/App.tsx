@@ -234,8 +234,23 @@ function EstateTruthMain() {
     },
   ]);
 
-  // 4 Buyer Verification Tools State
-  const [toolTab, setToolTab] = useState<'neighborhood' | 'registry' | 'cost' | 'scanner'>('neighborhood');
+  // 6 Buyer Verification, Govt Schemes & Global Compare Tools State
+  const [toolTab, setToolTab] = useState<'schemes' | 'global' | 'neighborhood' | 'registry' | 'cost' | 'scanner'>('schemes');
+  const [schemesList, setSchemesList] = useState<any[]>([]);
+  const [simCity, setSimCity] = useState<'Mumbai' | 'Navi Mumbai / Thane' | 'Pune' | 'Delhi NCR' | 'Bengaluru'>('Navi Mumbai / Thane');
+  const [simIncomeL, setSimIncomeL] = useState('7.5');
+  const [simBudgetL, setSimBudgetL] = useState('34');
+  const [simFirstTime, setSimFirstTime] = useState(true);
+  const [simFemale, setSimFemale] = useState(true);
+  const [simResult, setSimResult] = useState<any | null>(null);
+  const [simLoading, setSimLoading] = useState(false);
+
+  const [globalCityA, setGlobalCityA] = useState<'Mumbai' | 'Dubai' | 'London' | 'Singapore' | 'New York'>('Mumbai');
+  const [globalCityB, setGlobalCityB] = useState<'Mumbai' | 'Dubai' | 'London' | 'Singapore' | 'New York'>('Dubai');
+  const [globalBudgetM, setGlobalBudgetM] = useState('1.5');
+  const [globalResult, setGlobalResult] = useState<any | null>(null);
+  const [globalLoading, setGlobalLoading] = useState(false);
+
   const [envQuery, setEnvQuery] = useState('Pali Hill Bandra West Mumbai');
   const [envResult, setEnvResult] = useState<LiveNeighborhoodAudit | null>(null);
   const [envLoading, setEnvLoading] = useState(false);
@@ -499,8 +514,55 @@ function EstateTruthMain() {
     setScanLoading(false);
   };
 
+  const loadSchemes = async () => {
+    const data = await apiCall('/schemes', '/schemes');
+    if (data?.schemes) setSchemesList(data.schemes);
+  };
+
+  const runSchemeSimulation = async () => {
+    setSimLoading(true);
+    const data = await apiCall('/schemes/simulate', '/schemes/simulate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        city: simCity,
+        annualHouseholdIncomeLakh: Number(simIncomeL) || 7.5,
+        propertyBudgetLakh: Number(simBudgetL) || 34,
+        isFirstTimeBuyer: simFirstTime,
+        hasFemaleCoOwner: simFemale,
+        isUnderConstruction: true,
+        category: 'MIG',
+      }),
+    });
+    if (data?.simulation) setSimResult(data.simulation);
+    setSimLoading(false);
+  };
+
+  const runGlobalCompare = async (
+    overrideA?: 'Mumbai' | 'Dubai' | 'London' | 'Singapore' | 'New York',
+    overrideB?: 'Mumbai' | 'Dubai' | 'London' | 'Singapore' | 'New York'
+  ) => {
+    setGlobalLoading(true);
+    const data = await apiCall('/global/compare', '/global/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cityA: overrideA ?? globalCityA,
+        cityB: overrideB ?? globalCityB,
+        budgetUsdMillions: Number(globalBudgetM) || 1.5,
+      }),
+    });
+    if (data?.comparison) setGlobalResult(data.comparison);
+    setGlobalLoading(false);
+  };
+
   useEffect(() => {
     if (activeTab === 'tools') {
+      if (toolTab === 'schemes') {
+        if (schemesList.length === 0) loadSchemes();
+        if (!simResult) runSchemeSimulation();
+      }
+      if (toolTab === 'global' && !globalResult) runGlobalCompare();
       if (toolTab === 'neighborhood' && !envResult) runLiveNeighborhood();
       if (toolTab === 'registry' && !regResult) runRegistryVerify();
       if (toolTab === 'cost' && !costResult) runTrueCostAudit();
@@ -520,7 +582,7 @@ function EstateTruthMain() {
 
     return (
       <View style={[styles.root, { paddingTop: topInset }]}>
-        <StatusBar style="dark" backgroundColor="#FFFFFF" />
+        <StatusBar style="dark" />
 
         {/* Clean Top Action Bar (Strictly Below Android Status Bar!) */}
         <View style={styles.detailHeader}>
@@ -756,7 +818,7 @@ function EstateTruthMain() {
 
   return (
     <View style={[styles.root, { paddingTop: topInset }]}>
-      <StatusBar style="dark" backgroundColor="#FFFFFF" />
+      <StatusBar style="dark" />
 
       {/* =================================================================== */}
       {/* TAB 1: EXPLORE (AIRBNB PILL SEARCH + CATEGORY STRIP + PHOTO CARDS)  */}
@@ -793,7 +855,9 @@ function EstateTruthMain() {
             >
               {[
                 { id: 'All', label: 'All Homes', icon: 'compass-outline' as const, active: cityFilter === 'All' && !safeOnly, onPress: () => { setCityFilter('All'); setSafeOnly(false); } },
-                { id: 'Mumbai', label: 'Mumbai', icon: 'business-outline' as const, active: cityFilter === 'Mumbai', onPress: () => setCityFilter('Mumbai') },
+                { id: 'Schemes', label: 'Govt Schemes', icon: 'business-outline' as const, active: false, onPress: () => { setToolTab('schemes'); setActiveTab('tools'); } },
+                { id: 'Global', label: 'Global Compare', icon: 'globe-outline' as const, active: false, onPress: () => { setToolTab('global'); setActiveTab('tools'); } },
+                { id: 'Mumbai', label: 'Mumbai', icon: 'location-outline' as const, active: cityFilter === 'Mumbai', onPress: () => setCityFilter('Mumbai') },
                 { id: 'Dubai', label: 'Dubai', icon: 'sparkles-outline' as const, active: cityFilter === 'Dubai', onPress: () => setCityFilter('Dubai') },
                 { id: 'Clean', label: 'Clean Only', icon: 'shield-checkmark-outline' as const, active: safeOnly, onPress: () => setSafeOnly(!safeOnly) },
                 { id: 'AQI', label: 'Live AQI', icon: 'leaf-outline' as const, active: false, onPress: () => { setToolTab('neighborhood'); setActiveTab('tools'); } },
@@ -996,7 +1060,7 @@ function EstateTruthMain() {
         <View style={{ flex: 1 }}>
           <View style={styles.screenHeader}>
             <Text style={styles.h1}>Buyer Tools</Text>
-            <Text style={styles.caption}>Google Maps · Air Quality · RERA/DLD · Cost &amp; Clauses</Text>
+            <Text style={styles.caption}>Govt Schemes · Global Compare · Maps &amp; AQI · RERA/DLD</Text>
           </View>
 
           <ScrollView
@@ -1006,10 +1070,12 @@ function EstateTruthMain() {
             contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 10, gap: 8 }}
           >
             {[
-              { id: 'neighborhood', label: '1. Google Maps & AQI' },
-              { id: 'registry', label: '2. RERA / DLD' },
-              { id: 'cost', label: '3. True Cost' },
-              { id: 'scanner', label: '4. Clause Scanner' },
+              { id: 'schemes', label: 'Govt Schemes' },
+              { id: 'global', label: 'Global Compare' },
+              { id: 'neighborhood', label: 'Google Maps & AQI' },
+              { id: 'registry', label: 'RERA / DLD' },
+              { id: 'cost', label: 'True Cost' },
+              { id: 'scanner', label: 'Clause Scanner' },
             ].map((t) => {
               const active = toolTab === t.id;
               return (
@@ -1025,6 +1091,187 @@ function EstateTruthMain() {
           </ScrollView>
 
           <ScrollView contentContainerStyle={{ padding: 18, gap: 16, paddingBottom: 30 }}>
+            {/* TOOL A: INDIAN GOVT SCHEMES & STACKING SIMULATOR */}
+            {toolTab === 'schemes' && (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.h3}>Indian Govt Housing Scheme Stacking Simulator</Text>
+                  <Text style={styles.caption}>
+                    Combine PMAY-Urban 2.0, MHADA/CIDCO/DDA, Female Stamp Duty &amp; 1% Affordable GST.
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    {(['Mumbai', 'Navi Mumbai / Thane', 'Pune', 'Delhi NCR', 'Bengaluru'] as const).map((c) => (
+                      <Pressable
+                        key={c}
+                        onPress={() => setSimCity(c)}
+                        style={[styles.toolChip, simCity === c && styles.toolChipActive]}
+                      >
+                        <Text style={[styles.toolChipTxt, simCity === c && { color: '#FFFFFF' }]}>{c}</Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TextInput
+                      value={simIncomeL}
+                      onChangeText={setSimIncomeL}
+                      keyboardType="numeric"
+                      placeholder="Income ₹L/yr"
+                      style={[styles.inputBox, { flex: 1 }]}
+                    />
+                    <TextInput
+                      value={simBudgetL}
+                      onChangeText={setSimBudgetL}
+                      keyboardType="numeric"
+                      placeholder="Budget ₹L"
+                      style={[styles.inputBox, { flex: 1 }]}
+                    />
+                  </View>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.body}>First-Time Buyer</Text>
+                    <Switch value={simFirstTime} onValueChange={setSimFirstTime} trackColor={{ true: T.colors.rausch, false: '#DDDDDD' }} />
+                  </View>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.body}>Female Sole / Co-Owner</Text>
+                    <Switch value={simFemale} onValueChange={setSimFemale} trackColor={{ true: T.colors.rausch, false: '#DDDDDD' }} />
+                  </View>
+                  <Pressable onPress={runSchemeSimulation} style={styles.rauschBtnFull}>
+                    <Text style={styles.rauschBtnTxt}>
+                      {simLoading ? 'Calculating…' : 'Calculate Stacked Savings'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {simResult && (
+                  <View style={styles.card}>
+                    <View style={styles.rowBetween}>
+                      <View>
+                        <Text style={styles.verifiedTag}>TOTAL STACKED SAVINGS</Text>
+                        <Text style={styles.h1}>₹{simResult.totalStackedSavingsLakh} Lakh</Text>
+                      </View>
+                      <Text style={styles.verifiedTag}>{simResult.savingsPctOfBudget}% Saved</Text>
+                    </View>
+                    <Text style={styles.caption}>
+                      Effective Cost: ₹{simResult.netEffectiveCostLakh} Lakh
+                    </Text>
+                    {simResult.stackedBenefits.map((b: any, i: number) => (
+                      <View key={i} style={styles.grayCard}>
+                        <View style={styles.rowBetween}>
+                          <Text style={[styles.h3, { flex: 1 }]}>{b.schemeName}</Text>
+                          <Text style={b.eligible ? styles.verifiedTag : styles.caption}>
+                            {b.savingsLakhInr > 0 ? `₹${b.savingsLakhInr}L` : 'Not Eligible'}
+                          </Text>
+                        </View>
+                        <Text style={styles.caption}>{b.ruleSummary}</Text>
+                        <Text style={[styles.caption, { color: T.colors.danger }]}>Catch: {b.catchWarning}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {schemesList.map((s) => (
+                  <View key={s.slug} style={styles.card}>
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.verifiedTag}>{s.status.replace(/_/g, ' ')}</Text>
+                      <Text style={styles.caption}>
+                        {s.lockInYears > 0 ? `${s.lockInYears}-Yr Lock-In` : 'Zero Lock-In'}
+                      </Text>
+                    </View>
+                    <Text style={styles.h3}>{s.name}</Text>
+                    <Text style={styles.caption}>{s.stateOrRegion}</Text>
+                    <Text style={[styles.body, { color: T.colors.verified }]}>{s.maxBenefitHeadline}</Text>
+                    {s.hiddenCatches?.[0] ? (
+                      <Text style={[styles.caption, { color: T.colors.danger }]}>
+                        Hidden Catch: {s.hiddenCatches[0]}
+                      </Text>
+                    ) : null}
+                    <Pressable onPress={() => Linking.openURL(s.reraOrPortalUrl)} style={styles.darkBtnFull}>
+                      <Text style={styles.rauschBtnTxt}>Official Govt Portal →</Text>
+                    </Pressable>
+                  </View>
+                ))}
+              </>
+            )}
+
+            {/* TOOL B: GLOBAL CROSS-BORDER PROPERTY COMPARATOR */}
+            {toolTab === 'global' && (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.h3}>Global Cross-Border Property Comparator</Text>
+                  <Text style={styles.caption}>
+                    Compare True Indoor Sq.Ft., Foreign Buyer Taxes, Net Post-Tax Yield &amp; Live AQI across 5 hubs.
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    {[
+                      { label: 'Mumbai vs Dubai', a: 'Mumbai' as const, b: 'Dubai' as const },
+                      { label: 'Mumbai vs London', a: 'Mumbai' as const, b: 'London' as const },
+                      { label: 'Dubai vs London', a: 'Dubai' as const, b: 'London' as const },
+                      { label: 'Dubai vs Singapore', a: 'Dubai' as const, b: 'Singapore' as const },
+                      { label: 'London vs New York', a: 'London' as const, b: 'New York' as const },
+                    ].map((pair) => {
+                      const active = globalCityA === pair.a && globalCityB === pair.b;
+                      return (
+                        <Pressable
+                          key={pair.label}
+                          onPress={() => {
+                            setGlobalCityA(pair.a);
+                            setGlobalCityB(pair.b);
+                            runGlobalCompare(pair.a, pair.b);
+                          }}
+                          style={[styles.toolChip, active && styles.toolChipActive]}
+                        >
+                          <Text style={[styles.toolChipTxt, active && { color: '#FFFFFF' }]}>{pair.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                  <TextInput
+                    value={globalBudgetM}
+                    onChangeText={setGlobalBudgetM}
+                    keyboardType="numeric"
+                    placeholder="Budget ($M USD)"
+                    style={styles.inputBox}
+                  />
+                  <Pressable onPress={() => runGlobalCompare()} style={styles.rauschBtnFull}>
+                    <Text style={styles.rauschBtnTxt}>
+                      {globalLoading ? 'Comparing Live…' : `Compare ${globalCityA} vs ${globalCityB}`}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {globalResult && (
+                  <>
+                    <View style={styles.grayCard}>
+                      <Text style={styles.verifiedTag}>NORMALIZED VERDICT (${globalResult.budgetUsdMillions}M)</Text>
+                      <Text style={styles.body}>{globalResult.verdictSummary.executiveTakeaway}</Text>
+                    </View>
+                    {[globalResult.sideA, globalResult.sideB].map((side: any) => (
+                      <View key={side.city} style={styles.card}>
+                        <View style={styles.rowBetween}>
+                          <Text style={styles.h2}>{side.city} ({side.country})</Text>
+                          <Text style={styles.verifiedTag}>{side.netPostTaxYieldPct}% Net Yield</Text>
+                        </View>
+                        <Text style={styles.body}>
+                          True Indoor Area: {side.trueLivableIndoorSqFt.toLocaleString()} sq.ft. (${side.trueLivableUsdPerSqFt.toLocaleString()}/sq.ft.)
+                        </Text>
+                        <Text style={[styles.caption, { color: T.colors.danger }]}>
+                          Buyer Tax: ${side.allInFrictionCostUsd.toLocaleString()} ({side.foreignBuyerTaxPct}%)
+                        </Text>
+                        <Text style={styles.caption}>
+                          Live Air: US AQI {side.liveEnvironment.usAqi} · {side.liveEnvironment.temperatureC}°C · Elev {side.liveEnvironment.elevationMeters}m
+                        </Text>
+                        <View style={styles.grayCard}>
+                          <Text style={[styles.captionBold, { color: T.colors.danger }]}>Hidden Liabilities:</Text>
+                          {side.hiddenLiabilities.map((trap: string, idx: number) => (
+                            <Text key={idx} style={styles.caption}>• {trap}</Text>
+                          ))}
+                        </View>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+
             {/* TOOL 1: LIVE NEIGHBORHOOD */}
             {toolTab === 'neighborhood' && (
               <>

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DatabaseService } from '../storage/database.service';
+import { loadLensRoofSkillPrompt } from '../llm/lensroof-skills';
 
 export interface TrueCostInput {
   city: 'Mumbai' | 'Dubai';
@@ -357,8 +358,7 @@ Excerpt:
 """
 ${raw.slice(0, 3500)}
 """`,
-              system_instruction:
-                'You are a ruthless, buyer-only luxury real estate legal & forensic auditor specializing in Mumbai MahaRERA and Dubai DLD regulations. Output strictly valid raw JSON only.',
+              system_instruction: loadLensRoofSkillPrompt('legal-contract-redlining'),
               store: false,
             }),
             new Promise<never>((_, reject) => setTimeout(() => reject(new Error('LLM timeout')), 2500)),

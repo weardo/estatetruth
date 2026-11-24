@@ -8,6 +8,13 @@ import { HybridSearchService } from './modules/search/hybrid-search.service';
 import { DatabaseService } from './modules/storage/database.service';
 import { GeminiLlmService } from './modules/llm/gemini-llm.service';
 import { BuyerToolsService, TrueCostInput } from './modules/tools/buyer-tools.service';
+import {
+  LIVE_GOVT_SCHEMES,
+  simulateGovtSchemeStack,
+  compareGlobalCitiesEdge,
+  GlobalCityKey,
+  SchemeSimulationInput,
+} from './modules/tools/lensroof-engines';
 
 @Controller('api')
 export class AppController {
@@ -460,5 +467,44 @@ export class AppController {
       traction: this.db.getAutonomousTractionDashboard(this.search.getCorpus().length),
       competitorMatrix: this.buyerTools.getCompetitorAuditMatrix(),
     };
+  }
+
+  /**
+   * Indian Government Housing Schemes & Multi-Layer Stacking Simulator
+   */
+  @Get('schemes')
+  listGovtSchemes() {
+    return { ok: true, count: LIVE_GOVT_SCHEMES.length, schemes: LIVE_GOVT_SCHEMES };
+  }
+
+  @Post('schemes/simulate')
+  simulateGovtSchemes(@Body() body: Partial<SchemeSimulationInput>) {
+    const simulation = simulateGovtSchemeStack({
+      city: body.city || 'Mumbai',
+      annualHouseholdIncomeLakh: Number(body.annualHouseholdIncomeLakh || 8),
+      propertyBudgetLakh: Number(body.propertyBudgetLakh || 35),
+      isFirstTimeBuyer: body.isFirstTimeBuyer !== false,
+      hasFemaleCoOwner: body.hasFemaleCoOwner !== false,
+      isUnderConstruction: body.isUnderConstruction !== false,
+      category: body.category || 'MIG',
+    });
+    this.db.recordFunnelEvent('govt_scheme_simulated', 'schemes_session');
+    return { ok: true, simulation };
+  }
+
+  /**
+   * Global Cross-Border "Apples-to-Apples" Property Comparator (Mumbai, Dubai, London, Singapore, New York)
+   */
+  @Post('global/compare')
+  async compareGlobalCities(
+    @Body() body: { cityA?: GlobalCityKey; cityB?: GlobalCityKey; budgetUsdMillions?: number }
+  ) {
+    const comparison = await compareGlobalCitiesEdge(
+      body.cityA || 'Mumbai',
+      body.cityB || 'Dubai',
+      Number(body.budgetUsdMillions || 1.5)
+    );
+    this.db.recordFunnelEvent('global_compare_used', 'global_session');
+    return { ok: true, comparison };
   }
 }
