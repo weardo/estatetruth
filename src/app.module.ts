@@ -6,11 +6,17 @@ import { ObservabilityService } from './modules/observability/observability.serv
 import { IngestionService } from './modules/ingestion/ingestion.service';
 import { AnalyticsService } from './modules/analytics/analytics.service';
 import { MessagingController } from './modules/messaging/messaging.controller';
+import { DatabaseService } from './modules/storage/database.service';
+import { GeminiLlmService } from './modules/llm/gemini-llm.service';
+import { LiveGeoService } from './modules/geo/live-geo.service';
 
 @Module({
   imports: [],
   controllers: [AppController, MessagingController],
   providers: [
+    DatabaseService,
+    GeminiLlmService,
+    LiveGeoService,
     ObservabilityService,
     HybridSearchService,
     MultiAgentOrchestratorService,

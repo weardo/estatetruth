@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
+  Modal,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -12,23 +14,26 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-// Automatically connects to your local NestJS + LangGraph + Langfuse MLOps backend on LAN first,
-// with automatic fallback to your deployed Cloudflare Edge multi-agent engine!
-const LOCAL_NESTJS_API = 'http://192.168.1.53:4000/api/concierge/query';
-const CLOUDFLARE_EDGE_API = 'https://demos.soupup.ai/api/estatetruth/query';
+const API_BASE_LAN = 'http://192.168.1.53:4000/api';
+const API_FALLBACK_EDGE = 'https://demos.soupup.ai/api/estatetruth/query';
+const USER_ID = 'android_hni_client';
 
 interface EvidenceItem {
   source: string;
+  author?: string;
   quote: string;
   verifiedTag: string;
   date?: string;
+  sentiment?: string;
 }
 
-interface PropertyDossier {
-  propertyId: string;
+interface PropertyItem {
+  id: string;
   canonicalName: string;
+  developer: string;
+  city: 'Mumbai' | 'Dubai';
   microMarket: string;
-  city: string;
+  heroImage: string;
   priceCroreInr: number;
   priceUsdMillions: number;
   trueCarpetSqFt: number;
@@ -39,706 +44,1161 @@ interface PropertyDossier {
   activeReraLitigations: number;
   ambientNoiseDbNight: number;
   truthScore: number;
-  hybridRrfScore: number;
-  rerankScore: number;
   brokerClaim: string;
-  verifiedRealitySummary: string;
-  citations: EvidenceItem[];
-}
-
-interface RejectedTrap {
-  propertyId: string;
-  canonicalName: string;
-  reraId: string;
-  whyRejected: string[];
-}
-
-interface TraceSpan {
-  spanId: string;
-  name: string;
-  modelUsed?: string;
-  promptCacheHit?: boolean;
-  latencyMs: number;
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-}
-
-interface SearchComparison {
-  mode: string;
-  label?: string;
-  topResultNames: string[];
-  negationTrapCaught: boolean;
-  ndcgAt3?: number;
-  estimatedNdcgAt5?: number;
-  mrr?: number;
-}
-
-interface ConciergeResult {
-  traceId: string;
-  query: string;
-  parsedQuery: {
-    intent: string;
-    targetCity: string;
-    hardNegations: string[];
-    mustHaveConstraints: string[];
-    routingTier: string;
+  redFlags: string[];
+  floorplanVisionAudit: {
+    hasPrivateElevatorLobby: boolean;
+    stepFreeWheelchairEntry: boolean;
+    balconyDepthFeet: number;
+    sunlightOrientation: string;
+    obstructionRisk: string;
   };
-  geoAnchor: {
-    label: string;
-    lat: number;
-    lng: number;
-  };
-  answerHeadline: string;
-  conciergeNarrative: string;
-  verifiedDossiers: PropertyDossier[];
-  rejectedTraps: RejectedTrap[];
-  judgeVerdict: {
-    passed: boolean;
-    faithfulnessScore: number;
-    negationComplianceScore: number;
-    caughtAndHealedMessage?: string | null;
-  };
-  selfHealIterations: number;
-  searchComparisons: SearchComparison[];
-  langfuseTrace: {
+  evidence: EvidenceItem[];
+  isSaved?: boolean;
+  isDossierUnlocked?: boolean;
+}
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  properties?: Array<{
+    propertyId: string;
+    canonicalName: string;
+    microMarket: string;
+    heroImage?: string;
+    priceCroreInr: number;
+    truthScore: number;
+    activeReraLitigations: number;
+    ambientNoiseDbNight: number;
+    trueCarpetSqFt: number;
+  }>;
+  trapsCount?: number;
+  trace?: {
+    traceId: string;
     totalLatencyMs: number;
     totalCostUsd: number;
-    cacheHits: number;
-    spans: TraceSpan[];
+    selfHealIterations: number;
+    spans: Array<{ name: string; modelUsed?: string; latencyMs: number; metadata?: Record<string, unknown> }>;
+    comparisons: Array<{ mode: string; label?: string; topResultNames: string[]; negationTrapCaught: boolean; estimatedNdcgAt5?: number; ndcgAt3?: number }>;
   };
 }
 
-const PRESETS = [
-  {
-    tag: 'WORLI · NO RERA LITIGATION',
-    query:
-      'Sea-facing 4BHK in Worli under 40 Cr, zero MahaRERA litigation, no metro construction noise, private elevator',
-  },
-  {
-    tag: 'DUBAI · NO DJ/AIRBNB PARTY',
-    query:
-      'Ultra-luxury beachfront residence in Dubai with private elevator, NO loud DJ party clubs, NO Airbnb tourists, zero DLD disputes',
-  },
-  {
-    tag: 'MUMBAI · NO DOGS TRAP',
-    query:
-      'Quiet sea view luxury residence in Mumbai under 50 Cr, NO dogs allowed in lobby, zero RERA litigation',
-  },
-  {
-    tag: 'AUDIT · IMPERIAL CROWN TRAP',
-    query: 'Is Imperial Crown Heights Lower Parel safe? Check RERA litigation and noise',
-  },
-  {
-    tag: 'PALI HILL · STEP-FREE QUIET',
-    query:
-      'Quietest 4BHK in Pali Hill Bandra West, no highway noise, step-free wheelchair entrance, OC received, private lift',
-  },
+interface BookingItem {
+  id: string;
+  property_id: string;
+  canonical_name: string;
+  buyer_name: string;
+  preferred_date: string;
+  status: string;
+}
+
+const QUICK_ASKS = [
+  'Quiet sea-facing 4BHK in Worli under ₹40 Cr, zero legal disputes',
+  'Beachfront home in Dubai, no loud DJ clubs or Airbnb traffic',
+  'Is Imperial Crown Heights Lower Parel safe to buy?',
+  'Quietest home in Bandra with wheelchair step-free access',
 ];
 
 export default function App() {
-  const [query, setQuery] = useState(PRESETS[0].query);
-  const [tab, setTab] = useState<'concierge' | 'xray' | 'relevance'>('concierge');
+  const [activeTab, setActiveTab] = useState<'discover' | 'advisor' | 'saved'>('discover');
+  const [cityFilter, setCityFilter] = useState<'All' | 'Mumbai' | 'Dubai'>('All');
+  const [safeOnly, setSafeOnly] = useState(false);
+
+  const [properties, setProperties] = useState<PropertyItem[]>([]);
+  const [selectedProperty, setSelectedProperty] = useState<PropertyItem | null>(null);
+  const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [bookings, setBookings] = useState<BookingItem[]>([]);
+  const [loadingFeed, setLoadingFeed] = useState(true);
+  const [connectedMode, setConnectedMode] = useState<'live' | 'edge'>('live');
+
+  // Booking Modal State
+  const [bookingModalOpen, setBookingModalOpen] = useState(false);
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerContact, setBuyerContact] = useState('');
+  const [bookingSaving, setBookingSaving] = useState(false);
+
+  // Advisor Chat State (Powered by Live Gemini 4 + 5-Agent LangGraph!)
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome',
+      role: 'assistant',
+      text: 'Welcome to EstateTruth. Tell me what you’re looking for — including dealbreakers like "no RERA litigation", "no highway noise", or "private lift" — and I’ll cross-check government filings, acoustic data, and verified resident logs for you.',
+    },
+  ]);
+
+  // Optional Hidden MLOps X-Ray Modal (For CTOs / Engineers — stays completely out of a rich buyer's way!)
+  const [xrayOpen, setXrayOpen] = useState(false);
   const [simulateHallucination, setSimulateHallucination] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [backendLabel, setBackendLabel] = useState('Connecting…');
-  const [result, setResult] = useState<ConciergeResult | null>(null);
-  const [unlockedIds, setUnlockedIds] = useState<string[]>([]);
-  const [bookedId, setBookedId] = useState<string | null>(null);
+  const [lastTrace, setLastTrace] = useState<ChatMessage['trace'] | null>(null);
 
-  const runAudit = async (q: string, sim = simulateHallucination) => {
-    if (!q.trim()) return;
-    setLoading(true);
-    const body = JSON.stringify({
-      query: q.trim(),
-      sessionId: 'android_expo_hni',
-      simulateInitialHallucination: sim,
-    });
-
-    let data: ConciergeResult | null = null;
+  const fetchFeed = async (city = cityFilter, onlySafe = safeOnly) => {
+    setLoadingFeed(true);
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(LOCAL_NESTJS_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      const res = await fetch(
+        `${API_BASE_LAN}/properties?city=${encodeURIComponent(city)}&safeOnly=${onlySafe}&userId=${USER_ID}`
+      );
       if (res.ok) {
-        data = await res.json();
-        setBackendLabel('NestJS + LangGraph LAN (:4000)');
+        const json = await res.json();
+        setProperties(json.properties || []);
+        setSavedIds((json.properties || []).filter((p: PropertyItem) => p.isSaved).map((p: PropertyItem) => p.id));
+        setConnectedMode('live');
       }
     } catch {
-      // Fallback seamlessly to Cloudflare Edge Worker
+      setConnectedMode('edge');
     }
+    setLoadingFeed(false);
+  };
 
-    if (!data) {
-      try {
-        const res = await fetch(CLOUDFLARE_EDGE_API, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        });
-        if (res.ok) {
-          data = await res.json();
-          setBackendLabel('Cloudflare Edge Multi-Agent');
-        }
-      } catch {
-        setBackendLabel('Offline — check Wi-Fi');
+  const fetchBookings = async () => {
+    try {
+      const res = await fetch(`${API_BASE_LAN}/bookings?userId=${USER_ID}`);
+      if (res.ok) {
+        const json = await res.json();
+        setBookings(json.bookings || []);
       }
+    } catch {
+      // ignore
     }
-
-    if (data) setResult(data);
-    setLoading(false);
   };
 
   useEffect(() => {
-    runAudit(PRESETS[0].query, false);
-  }, []);
+    fetchFeed(cityFilter, safeOnly);
+    fetchBookings();
+  }, [cityFilter, safeOnly]);
 
+  const handleToggleSave = async (prop: PropertyItem) => {
+    const currentlySaved = savedIds.includes(prop.id);
+    setSavedIds((prev) => (currentlySaved ? prev.filter((id) => id !== prop.id) : [...prev, prop.id]));
+    try {
+      await fetch(`${API_BASE_LAN}/saved/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, propertyId: prop.id }),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleUnlockDossier = async (prop: PropertyItem) => {
+    setSelectedProperty((prev) => (prev ? { ...prev, isDossierUnlocked: true } : prev));
+    setProperties((prev) => prev.map((p) => (p.id === prop.id ? { ...p, isDossierUnlocked: true } : p)));
+    try {
+      await fetch(`${API_BASE_LAN}/dossiers/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, propertyId: prop.id }),
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!selectedProperty || !buyerName.trim() || !buyerContact.trim()) return;
+    setBookingSaving(true);
+    try {
+      const res = await fetch(`${API_BASE_LAN}/bookings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: USER_ID,
+          propertyId: selectedProperty.id,
+          buyerName: buyerName.trim(),
+          buyerContact: buyerContact.trim(),
+          preferredDate: 'This Weekend · Private Chauffeur',
+        }),
+      });
+      if (res.ok) {
+        await fetchBookings();
+        setBookingModalOpen(false);
+        setBuyerName('');
+        setBuyerContact('');
+      }
+    } catch {
+      // ignore
+    }
+    setBookingSaving(false);
+  };
+
+  const handleSendAsk = async (textOverride?: string) => {
+    const q = (textOverride ?? chatInput).trim();
+    if (!q || chatLoading) return;
+    setChatInput('');
+    setActiveTab('advisor');
+    setChatLoading(true);
+
+    const userMsg: ChatMessage = { id: `u_${Date.now()}`, role: 'user', text: q };
+    setMessages((prev) => [...prev, userMsg]);
+
+    let data: any = null;
+    try {
+      const res = await fetch(`${API_BASE_LAN}/concierge/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: q,
+          sessionId: 'android_advisor_session',
+          userId: USER_ID,
+          simulateInitialHallucination: simulateHallucination,
+        }),
+      });
+      if (res.ok) data = await res.json();
+    } catch {
+      try {
+        const res = await fetch(API_FALLBACK_EDGE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q, sessionId: 'android_advisor_session' }),
+        });
+        if (res.ok) data = await res.json();
+      } catch {
+        // ignore
+      }
+    }
+
+    if (data) {
+      const traceInfo: ChatMessage['trace'] = {
+        traceId: data.traceId,
+        totalLatencyMs: data.langfuseTrace?.totalLatencyMs || 0,
+        totalCostUsd: data.langfuseTrace?.totalCostUsd || 0,
+        selfHealIterations: data.selfHealIterations || 0,
+        spans: data.langfuseTrace?.spans || [],
+        comparisons: data.searchComparisons || [],
+      };
+      setLastTrace(traceInfo);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `a_${Date.now()}`,
+          role: 'assistant',
+          text: data.conciergeNarrative,
+          properties: data.verifiedDossiers || [],
+          trapsCount: data.rejectedTraps?.length || 0,
+          trace: traceInfo,
+        },
+      ]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `e_${Date.now()}`,
+          role: 'assistant',
+          text: 'Could not reach the EstateTruth server right now. Check that your phone is on the same Wi-Fi network.',
+        },
+      ]);
+    }
+    setChatLoading(false);
+  };
+
+  const openPropertyById = (propertyId: string) => {
+    const found = properties.find((p) => p.id === propertyId);
+    if (found) setSelectedProperty(found);
+  };
+
+  const savedProperties = properties.filter((p) => savedIds.includes(p.id));
+
+  // =========================================================================
+  // FULL-SCREEN PROPERTY FORENSIC REPORT VIEW (When user taps any residence)
+  // =========================================================================
+  if (selectedProperty) {
+    const isDanger = selectedProperty.activeReraLitigations > 0 || selectedProperty.truthScore < 60;
+    const isSaved = savedIds.includes(selectedProperty.id);
+    const hasBooked = bookings.some((b) => b.property_id === selectedProperty.id);
+
+    return (
+      <SafeAreaView style={styles.root}>
+        <StatusBar style="light" />
+        <ScrollView contentContainerStyle={{ paddingBottom: 110 }}>
+          {/* Hero Photo Header */}
+          <View style={styles.detailHeroWrap}>
+            <Image source={{ uri: selectedProperty.heroImage }} style={styles.detailHeroImg} />
+            <View style={styles.heroOverlayTop}>
+              <TouchableOpacity onPress={() => setSelectedProperty(null)} style={styles.roundIconBtn}>
+                <Text style={styles.roundIconTxt}>←</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => handleToggleSave(selectedProperty)} style={styles.roundIconBtn}>
+                <Text style={[styles.roundIconTxt, isSaved && { color: '#fb7185' }]}>
+                  {isSaved ? '♥' : '♡'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.detailScoreBadge, isDanger && styles.badgeDanger]}>
+              <Text style={styles.detailScoreText}>
+                {isDanger
+                  ? `⚠️ Caution · ${selectedProperty.truthScore}/100 Safety Score`
+                  : `✓ Verified Safe · ${selectedProperty.truthScore}/100`}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.detailBody}>
+            <Text style={styles.detailMicro}>
+              {selectedProperty.microMarket} · {selectedProperty.city}
+            </Text>
+            <Text style={styles.detailTitle}>{selectedProperty.canonicalName}</Text>
+            <Text style={styles.detailPrice}>
+              ₹{selectedProperty.priceCroreInr} Cr{' '}
+              <Text style={styles.detailPriceUsd}>(${selectedProperty.priceUsdMillions}M)</Text>
+            </Text>
+
+            {/* 3 Plain-English Key Checks */}
+            <View style={styles.checkGrid}>
+              <View style={styles.checkCard}>
+                <Text style={styles.checkLabel}>Legal &amp; RERA</Text>
+                <Text style={[styles.checkVal, selectedProperty.activeReraLitigations > 0 && { color: '#fb7185' }]}>
+                  {selectedProperty.activeReraLitigations === 0
+                    ? '0 Disputes'
+                    : `${selectedProperty.activeReraLitigations} Litigations`}
+                </Text>
+                <Text style={styles.checkSub}>{selectedProperty.reraStatus.replace('_', ' ')}</Text>
+              </View>
+              <View style={styles.checkCard}>
+                <Text style={styles.checkLabel}>Night Quietness</Text>
+                <Text style={[styles.checkVal, selectedProperty.ambientNoiseDbNight > 55 && { color: '#fb7185' }]}>
+                  {selectedProperty.ambientNoiseDbNight} dB
+                </Text>
+                <Text style={styles.checkSub}>
+                  {selectedProperty.ambientNoiseDbNight <= 45 ? 'Whisper Quiet' : 'Loud Traffic'}
+                </Text>
+              </View>
+              <View style={styles.checkCard}>
+                <Text style={styles.checkLabel}>True Carpet</Text>
+                <Text style={styles.checkVal}>{selectedProperty.trueCarpetSqFt.toLocaleString()}</Text>
+                <Text style={styles.checkSub}>sq.ft. verified</Text>
+              </View>
+            </View>
+
+            {/* Broker Claim vs Reality */}
+            <View style={styles.truthSection}>
+              <Text style={styles.sectionH}>Broker Claim vs. Verified Reality</Text>
+              <View style={styles.brokerCard}>
+                <Text style={styles.brokerLbl}>What Brochures Say</Text>
+                <Text style={styles.brokerTxt}>"{selectedProperty.brokerClaim}"</Text>
+              </View>
+              <View style={[styles.realityCard, isDanger && styles.realityCardDanger]}>
+                <Text style={[styles.realityLbl, isDanger && { color: '#fda4af' }]}>
+                  What Our Audit Found
+                </Text>
+                <Text style={styles.realityTxt}>
+                  True RERA carpet is {selectedProperty.trueCarpetSqFt.toLocaleString()} sq.ft. (brokers advertise{' '}
+                  {selectedProperty.brokerAdvertisedSqFt.toLocaleString()} sq.ft. — {selectedProperty.carpetInflationPct}%
+                  inflation). Private lift lobby:{' '}
+                  {selectedProperty.floorplanVisionAudit.hasPrivateElevatorLobby ? 'Yes ✓' : 'No (Shared) ✗'}.
+                  Step-free access:{' '}
+                  {selectedProperty.floorplanVisionAudit.stepFreeWheelchairEntry ? 'Yes ✓' : 'No (Steps) ✗'}.
+                </Text>
+              </View>
+            </View>
+
+            {/* Verified Resident & Registry Evidence */}
+            <View style={styles.truthSection}>
+              <Text style={styles.sectionH}>Verified Evidence &amp; Resident Logs</Text>
+              {selectedProperty.evidence.map((ev, idx) => (
+                <View key={idx} style={styles.evCard}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <Text style={styles.evAuthor}>{ev.author || ev.source}</Text>
+                    <Text style={styles.evDate}>{ev.date}</Text>
+                  </View>
+                  <Text style={styles.evQuote}>"{ev.quote}"</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Paid Dossier Unlock Section */}
+            <TouchableOpacity
+              onPress={() => handleUnlockDossier(selectedProperty)}
+              style={styles.dossierBtn}
+            >
+              <Text style={styles.dossierBtnText}>
+                {selectedProperty.isDossierUnlocked
+                  ? '✓ Full CA Form-3 Escrow & 30-Yr Title Report Unlocked'
+                  : 'Unlock Full RERA + 30-Yr Legal Dossier · ₹9,999'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* Sticky Bottom CTA Bar */}
+        <View style={styles.stickyFooter}>
+          <View>
+            <Text style={styles.footerPrice}>₹{selectedProperty.priceCroreInr} Cr</Text>
+            <Text style={styles.footerSub}>Zero broker commission bias</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setBookingModalOpen(true)}
+            style={styles.bookBtn}
+          >
+            <Text style={styles.bookBtnText}>
+              {hasBooked ? 'Viewing Confirmed ✓' : 'Book Private Viewing'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Private Viewing Booking Modal (Saves directly to SQLite!) */}
+        <Modal visible={bookingModalOpen} transparent animationType="slide">
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Arrange Private Viewing</Text>
+              <Text style={styles.modalSub}>
+                Chauffeur-assisted private tour for {selectedProperty.canonicalName} (buyer-side representation only).
+              </Text>
+              <TextInput
+                value={buyerName}
+                onChangeText={setBuyerName}
+                placeholder="Your Full Name"
+                placeholderTextColor="#7a746c"
+                style={styles.modalInput}
+              />
+              <TextInput
+                value={buyerContact}
+                onChangeText={setBuyerContact}
+                placeholder="WhatsApp Number or Email"
+                placeholderTextColor="#7a746c"
+                style={styles.modalInput}
+              />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 6 }}>
+                <TouchableOpacity
+                  onPress={() => setBookingModalOpen(false)}
+                  style={[styles.modalBtnSecondary, { flex: 1 }]}
+                >
+                  <Text style={styles.modalBtnSecTxt}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleConfirmBooking}
+                  disabled={bookingSaving}
+                  style={[styles.modalBtnPrimary, { flex: 1.5 }]}
+                >
+                  <Text style={styles.modalBtnPriTxt}>
+                    {bookingSaving ? 'Confirming…' : 'Confirm Viewing'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
+
+  // =========================================================================
+  // MAIN 3-TAB LUXURY CONSUMER APP (Discover | AI Advisor | Saved)
+  // =========================================================================
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        {/* Luxury Private-Banking Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.brand}>
-              EstateTruth<Text style={styles.brandGold}>.ai</Text>
-            </Text>
-            <Text style={styles.subtitle}>Luxury Real Estate Forensics · Multi-Agent MLOps</Text>
-          </View>
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>{backendLabel}</Text>
-          </View>
+
+      {/* Clean Minimal Luxury Top Bar */}
+      <View style={styles.topBar}>
+        <View>
+          <Text style={styles.logo}>
+            EstateTruth<Text style={styles.logoGold}>.</Text>
+          </Text>
+          <Text style={styles.tagline}>Verified Luxury Residences · Mumbai &amp; Dubai</Text>
         </View>
+        {/* Subtle Engineering Mode Icon for CTOs / Recruiters */}
+        <TouchableOpacity onPress={() => setXrayOpen(true)} style={styles.devPill}>
+          <Text style={styles.devPillText}>{'</>'} MLOps</Text>
+        </TouchableOpacity>
+      </View>
 
-        {/* Tab Bar */}
-        <View style={styles.tabRow}>
-          {[
-            { id: 'concierge', label: 'HNI Concierge' },
-            { id: 'xray', label: 'MLOps X-Ray' },
-            { id: 'relevance', label: 'NDCG / MRR' },
-          ].map((t) => {
-            const active = tab === t.id;
-            return (
-              <TouchableOpacity
-                key={t.id}
-                onPress={() => setTab(t.id as typeof tab)}
-                style={[styles.tabBtn, active && styles.tabBtnActive]}
-              >
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Search & Hallucination Stress Test Card */}
-        <View style={styles.searchCard}>
-          <Text style={styles.kicker}>ANTI-HALLUCINATION LUXURY DISCOVERY</Text>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            multiline
-            placeholder="Ask with hard negations (e.g., NO RERA litigation, NO highway noise)..."
-            placeholderTextColor="#7a7268"
-            style={styles.input}
-          />
-
-          <View style={styles.switchRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.switchTitle}>Inject Hallucination Stress Test</Text>
-              <Text style={styles.switchSub}>Watch Node 5 Judge catch &amp; self-heal a trap</Text>
-            </View>
-            <Switch
-              value={simulateHallucination}
-              onValueChange={(v) => {
-                setSimulateHallucination(v);
-                runAudit(query, v);
-              }}
-              trackColor={{ false: '#2a2a32', true: '#e5a96c' }}
-              thumbColor={simulateHallucination ? '#070709' : '#c7bbb0'}
-            />
-          </View>
-
+      {/* TAB 1: DISCOVER — Visual Sotheby's / Airbnb Luxe Feed */}
+      {activeTab === 'discover' && (
+        <ScrollView contentContainerStyle={styles.scrollBody} showsVerticalScrollIndicator={false}>
+          {/* Natural Ask Bar right at top */}
           <TouchableOpacity
-            onPress={() => runAudit(query, simulateHallucination)}
-            disabled={loading}
-            style={styles.primaryBtn}
+            onPress={() => setActiveTab('advisor')}
+            activeOpacity={0.85}
+            style={styles.fakeSearchBar}
           >
-            {loading ? (
-              <ActivityIndicator color="#070709" />
-            ) : (
-              <Text style={styles.primaryBtnText}>RUN 5-AGENT FORENSIC AUDIT</Text>
-            )}
+            <Text style={styles.searchIcon}>✦</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.searchMain}>Ask our AI Advisor anything…</Text>
+              <Text style={styles.searchHint}>"Quiet Worli sea-facing 4BHK, zero RERA disputes"</Text>
+            </View>
           </TouchableOpacity>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
-            {PRESETS.map((p) => (
-              <TouchableOpacity
-                key={p.tag}
-                onPress={() => {
-                  setQuery(p.query);
-                  runAudit(p.query, simulateHallucination);
-                }}
-                style={styles.presetChip}
-              >
-                <Text style={styles.presetText}>{p.tag}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* Live Langfuse Telemetry Strip */}
-        {result && (
-          <View style={styles.metricsGrid}>
-            <View style={styles.metricBox}>
-              <Text style={styles.metricLabel}>TRACE ID</Text>
-              <Text style={styles.metricValGreen} numberOfLines={1}>
-                {result.traceId}
-              </Text>
-            </View>
-            <View style={styles.metricBox}>
-              <Text style={styles.metricLabel}>LATENCY / TIER</Text>
-              <Text style={styles.metricVal}>
-                {result.langfuseTrace.totalLatencyMs}ms · {result.parsedQuery.routingTier}
-              </Text>
-            </View>
-            <View style={styles.metricBox}>
-              <Text style={styles.metricLabel}>TOKEN COST</Text>
-              <Text style={styles.metricValGold}>${result.langfuseTrace.totalCostUsd.toFixed(5)}</Text>
-            </View>
-            <View style={styles.metricBox}>
-              <Text style={styles.metricLabel}>JUDGE FAITHFULNESS</Text>
-              <Text style={styles.metricValGreen}>
-                {(result.judgeVerdict.faithfulnessScore * 100).toFixed(0)}%{' '}
-                {result.selfHealIterations > 0 ? '(Self-Healed)' : '(Clean)'}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Self-Heal Alert Banner */}
-        {result && result.selfHealIterations > 0 && (
-          <View style={styles.healBanner}>
-            <Text style={styles.healTitle}>⚡ LANGGRAPH SELF-HEALING TRIGGERED (1 / 2 LOOPS)</Text>
-            <Text style={styles.healBody}>
-              Node 5 (LLM-as-a-Judge) caught an ungrounded RERA-litigation property leak on Iteration 1, escalated negation penalties 2.5x, cycled back to Hybrid Retrieval, and verified the final answer.
-            </Text>
-          </View>
-        )}
-
-        {/* TAB 1: HNI CONCIERGE RESULTS */}
-        {tab === 'concierge' && result && (
-          <View style={{ gap: 14 }}>
-            <Text style={styles.sectionTitle}>{result.answerHeadline}</Text>
-
-            {result.verifiedDossiers.map((d, idx) => {
-              const isDanger = d.activeReraLitigations > 0 || d.truthScore < 60;
-              const unlocked = unlockedIds.includes(d.propertyId);
+          {/* Clean City & Safety Filters */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
+            {(['All', 'Mumbai', 'Dubai'] as const).map((c) => {
+              const active = cityFilter === c;
               return (
-                <View
-                  key={d.propertyId}
-                  style={[styles.dossierCard, isDanger && styles.dossierCardDanger]}
+                <TouchableOpacity
+                  key={c}
+                  onPress={() => setCityFilter(c)}
+                  style={[styles.filterChip, active && styles.filterChipActive]}
                 >
-                  <View style={styles.dossierHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.microTag}>
-                        #{idx + 1} · {d.city.toUpperCase()} · {d.microMarket.toUpperCase()}
-                      </Text>
-                      <Text style={styles.propName}>{d.canonicalName}</Text>
-                      <Text style={styles.priceLine}>
-                        ₹{d.priceCroreInr} Cr (${d.priceUsdMillions}M) · {d.reraStatus}
-                      </Text>
-                    </View>
-                    <View style={[styles.scoreDial, isDanger && styles.scoreDialDanger]}>
-                      <Text style={styles.scoreLabel}>TRUTH</Text>
-                      <Text style={[styles.scoreNum, isDanger && styles.scoreNumDanger]}>
-                        {d.truthScore}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.statStrip}>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statLbl}>TRUE CARPET</Text>
-                      <Text style={styles.statVal}>{d.trueCarpetSqFt} sq.ft</Text>
-                      <Text style={styles.statWarn}>+{d.carpetInflationPct}% broker hype</Text>
-                    </View>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statLbl}>RERA CASES</Text>
-                      <Text style={[styles.statVal, d.activeReraLitigations > 0 && { color: '#fb7185' }]}>
-                        {d.activeReraLitigations} Active
-                      </Text>
-                      <Text style={styles.statSub}>{d.reraId}</Text>
-                    </View>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statLbl}>NIGHT NOISE</Text>
-                      <Text style={[styles.statVal, d.ambientNoiseDbNight > 55 && { color: '#fb7185' }]}>
-                        {d.ambientNoiseDbNight} dB
-                      </Text>
-                      <Text style={styles.statSub}>Measured</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.compareBox}>
-                    <Text style={styles.brokerTag}>BROKER CLAIM</Text>
-                    <Text style={styles.brokerText}>"{d.brokerClaim}"</Text>
-                  </View>
-
-                  <View style={[styles.compareBox, styles.truthBox]}>
-                    <Text style={styles.truthTag}>VERIFIED FORENSIC REALITY</Text>
-                    <Text style={styles.truthText}>{d.verifiedRealitySummary}</Text>
-                  </View>
-
-                  <Text style={styles.citeHeading}>VERIFIED CITATIONS ({d.citations.length})</Text>
-                  {d.citations.map((c, ci) => (
-                    <View key={ci} style={styles.citeCard}>
-                      <Text style={styles.citeMeta}>
-                        [{c.source}] · {c.verifiedTag}
-                      </Text>
-                      <Text style={styles.citeQuote}>"{c.quote}"</Text>
-                    </View>
-                  ))}
-
-                  <View style={styles.ctaRow}>
-                    <TouchableOpacity
-                      onPress={() => {
-                        if (!unlocked) setUnlockedIds((prev) => [...prev, d.propertyId]);
-                      }}
-                      style={styles.outlineBtn}
-                    >
-                      <Text style={styles.outlineBtnText}>
-                        {unlocked ? '30-Yr Title Dossier Unlocked ✓' : 'Unlock RERA Dossier (₹9,999)'}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setBookedId(d.propertyId)}
-                      style={styles.whiteBtn}
-                    >
-                      <Text style={styles.whiteBtnText}>
-                        {bookedId === d.propertyId ? 'Private Viewing Booked ✓' : 'Book Viewing'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                  <Text style={[styles.filterTxt, active && styles.filterTxtActive]}>
+                    {c === 'All' ? 'All Cities' : c}
+                  </Text>
+                </TouchableOpacity>
               );
             })}
+            <TouchableOpacity
+              onPress={() => setSafeOnly(!safeOnly)}
+              style={[styles.filterChip, safeOnly && styles.filterChipGreen]}
+            >
+              <Text style={[styles.filterTxt, safeOnly && { color: '#06150f' }]}>
+                ✓ Verified Clean Only
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
 
-            {/* Rejected Broker Traps */}
-            {result.rejectedTraps.length > 0 && (
-              <View style={styles.trapsCard}>
-                <Text style={styles.trapsTitle}>
-                  ⛔ BROKER TRAPS ELIMINATED ({result.rejectedTraps.length})
-                </Text>
-                {result.rejectedTraps.map((trap) => (
-                  <View key={trap.propertyId} style={styles.trapItem}>
-                    <Text style={styles.trapName}>
-                      {trap.canonicalName} · {trap.reraId}
-                    </Text>
-                    {trap.whyRejected.map((r, ri) => (
-                      <Text key={ri} style={styles.trapReason}>
-                        ✕ {r}
+          {loadingFeed ? (
+            <ActivityIndicator size="large" color="#e5a96c" style={{ marginTop: 40 }} />
+          ) : (
+            properties.map((prop) => {
+              const isDanger = prop.activeReraLitigations > 0 || prop.truthScore < 60;
+              const isSaved = savedIds.includes(prop.id);
+              return (
+                <TouchableOpacity
+                  key={prop.id}
+                  activeOpacity={0.92}
+                  onPress={() => setSelectedProperty(prop)}
+                  style={styles.propCard}
+                >
+                  <View style={styles.cardImageWrap}>
+                    <Image source={{ uri: prop.heroImage }} style={styles.cardImg} />
+                    <View style={[styles.trustPill, isDanger && styles.trustPillDanger]}>
+                      <Text style={styles.trustPillTxt}>
+                        {isDanger
+                          ? `⚠️ Red Flag · ${prop.truthScore}/100`
+                          : `✓ Verified Safe · ${prop.truthScore}/100`}
                       </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleToggleSave(prop)}
+                      style={styles.cardHeartBtn}
+                    >
+                      <Text style={[styles.cardHeartTxt, isSaved && { color: '#fb7185' }]}>
+                        {isSaved ? '♥' : '♡'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.cardContent}>
+                    <View style={styles.cardRowBetween}>
+                      <Text style={styles.cardMicro}>
+                        {prop.microMarket} · {prop.city}
+                      </Text>
+                      <Text style={styles.cardPrice}>₹{prop.priceCroreInr} Cr</Text>
+                    </View>
+                    <Text style={styles.cardTitle}>{prop.canonicalName}</Text>
+                    <View style={styles.pillRow}>
+                      <View style={styles.infoChip}>
+                        <Text style={[styles.infoChipTxt, prop.activeReraLitigations > 0 && { color: '#fda4af' }]}>
+                          {prop.activeReraLitigations === 0
+                            ? '0 Legal Disputes'
+                            : `${prop.activeReraLitigations} RERA Cases`}
+                        </Text>
+                      </View>
+                      <View style={styles.infoChip}>
+                        <Text style={[styles.infoChipTxt, prop.ambientNoiseDbNight > 55 && { color: '#fda4af' }]}>
+                          {prop.ambientNoiseDbNight} dB Night
+                        </Text>
+                      </View>
+                      <View style={styles.infoChip}>
+                        <Text style={styles.infoChipTxt}>{prop.trueCarpetSqFt.toLocaleString()} sq.ft</Text>
+                      </View>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
+
+      {/* TAB 2: AI ADVISOR — Real Multi-Turn Gemini 4 Conversational Chat */}
+      {activeTab === 'advisor' && (
+        <View style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={styles.chatBody}>
+            {messages.map((m) => (
+              <View
+                key={m.id}
+                style={[styles.msgBubble, m.role === 'user' ? styles.msgUser : styles.msgAssistant]}
+              >
+                <Text style={m.role === 'user' ? styles.msgUserTxt : styles.msgAiTxt}>{m.text}</Text>
+
+                {/* Embedded Clean Property Cards inside Chat */}
+                {m.properties && m.properties.length > 0 && (
+                  <View style={{ gap: 10, marginTop: 12 }}>
+                    {m.properties.map((p) => (
+                      <TouchableOpacity
+                        key={p.propertyId}
+                        onPress={() => openPropertyById(p.propertyId)}
+                        style={styles.chatPropCard}
+                      >
+                        {p.heroImage && <Image source={{ uri: p.heroImage }} style={styles.chatPropThumb} />}
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.chatPropName} numberOfLines={1}>
+                            {p.canonicalName}
+                          </Text>
+                          <Text style={styles.chatPropMeta}>
+                            ₹{p.priceCroreInr} Cr · {p.ambientNoiseDbNight} dB · {p.activeReraLitigations} cases
+                          </Text>
+                          <Text style={styles.chatPropScore}>
+                            Safety Score: {p.truthScore}/100 · Tap for full audit →
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
                     ))}
                   </View>
+                )}
+
+                {m.trapsCount && m.trapsCount > 0 ? (
+                  <Text style={styles.trapsFoot}>
+                    🛡️ Automatically filtered out {m.trapsCount} broker traps that failed your rules.
+                  </Text>
+                ) : null}
+              </View>
+            ))}
+
+            {chatLoading && (
+              <View style={[styles.msgBubble, styles.msgAssistant, { flexDirection: 'row', gap: 10, alignItems: 'center' }]}>
+                <ActivityIndicator color="#e5a96c" size="small" />
+                <Text style={styles.msgAiTxt}>Auditing RERA filings &amp; acoustic data with Gemini 4…</Text>
+              </View>
+            )}
+
+            {/* Quick Tap Suggestions */}
+            {messages.length <= 2 && (
+              <View style={{ gap: 8, marginTop: 8 }}>
+                <Text style={styles.quickLabel}>Try asking:</Text>
+                {QUICK_ASKS.map((qa) => (
+                  <TouchableOpacity
+                    key={qa}
+                    onPress={() => handleSendAsk(qa)}
+                    style={styles.quickChip}
+                  >
+                    <Text style={styles.quickChipTxt}>{qa}</Text>
+                  </TouchableOpacity>
                 ))}
               </View>
             )}
-          </View>
-        )}
+          </ScrollView>
 
-        {/* TAB 2: MLOPS X-RAY (LANGGRAPH + LANGFUSE WATERFALL) */}
-        {tab === 'xray' && result && (
-          <View style={styles.xrayCard}>
-            <Text style={styles.kicker}>LANGFUSE SPAN WATERFALL ({result.langfuseTrace.spans.length} SPANS)</Text>
-            <Text style={styles.sectionTitle}>5-Node Cyclic LangGraph Trace</Text>
-            {result.langfuseTrace.spans.map((sp) => {
-              const isReject = sp.name.includes('REJECTED');
-              return (
-                <View
-                  key={sp.spanId}
-                  style={[styles.spanRow, isReject && { borderColor: 'rgba(244,63,94,0.6)' }]}
-                >
-                  <Text style={styles.spanName}>{sp.name}</Text>
-                  <Text style={styles.spanMeta}>
-                    {sp.modelUsed || 'Deterministic Tool'} · {sp.latencyMs}ms ·{' '}
-                    {sp.inputTokens + sp.outputTokens} tok · ${sp.estimatedCostUsd.toFixed(5)}
-                    {sp.promptCacheHit ? ' · CACHE HIT' : ''}
+          {/* Chat Composer */}
+          <View style={styles.chatInputBar}>
+            <TextInput
+              value={chatInput}
+              onChangeText={setChatInput}
+              placeholder="Ask about any area, budget, or dealbreaker..."
+              placeholderTextColor="#7a746c"
+              style={styles.chatInput}
+              onSubmitEditing={() => handleSendAsk()}
+            />
+            <TouchableOpacity onPress={() => handleSendAsk()} style={styles.sendBtn}>
+              <Text style={styles.sendBtnTxt}>↑</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* TAB 3: SAVED SHORTLIST & CONFIRMED VIEWINGS (Persisted in SQLite!) */}
+      {activeTab === 'saved' && (
+        <ScrollView contentContainerStyle={styles.scrollBody}>
+          <Text style={styles.sectionH}>Your Shortlist ({savedProperties.length})</Text>
+          {savedProperties.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTxt}>Tap ♡ on any residence in Discover to save it here.</Text>
+            </View>
+          ) : (
+            savedProperties.map((p) => (
+              <TouchableOpacity
+                key={p.id}
+                onPress={() => setSelectedProperty(p)}
+                style={styles.savedRow}
+              >
+                <Image source={{ uri: p.heroImage }} style={styles.savedThumb} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardTitle}>{p.canonicalName}</Text>
+                  <Text style={styles.cardMicro}>
+                    {p.microMarket} · ₹{p.priceCroreInr} Cr · Score {p.truthScore}/100
                   </Text>
                 </View>
-              );
-            })}
-          </View>
-        )}
+              </TouchableOpacity>
+            ))
+          )}
 
-        {/* TAB 3: SEARCH RELEVANCE LAB (NDCG@3 & MRR) */}
-        {tab === 'relevance' && result && (
-          <View style={{ gap: 12 }}>
-            <Text style={styles.sectionTitle}>Golden Dataset Relevance Benchmark</Text>
-            {result.searchComparisons.map((c) => {
-              const isWin = c.mode === 'hybrid_rrf_rerank';
-              return (
-                <View
-                  key={c.mode}
-                  style={[styles.relCard, isWin && { borderColor: 'rgba(52,211,153,0.65)', backgroundColor: '#0b1813' }]}
-                >
-                  <View style={styles.relHeader}>
-                    <Text style={styles.relTitle}>{c.label || c.mode}</Text>
-                    <Text style={[styles.relBadge, !c.negationTrapCaught && { color: '#fb7185' }]}>
-                      {c.negationTrapCaught ? 'TRAP BLOCKED ✓' : 'TRAP LEAKED ✕'}
-                    </Text>
-                  </View>
-                  <Text style={styles.relScores}>
-                    NDCG@3: {(c.ndcgAt3 ?? c.estimatedNdcgAt5 ?? 0.7).toFixed(3)}   |   MRR:{' '}
-                    {(c.mrr ?? (isWin ? 0.958 : 0.65)).toFixed(3)}
+          <Text style={[styles.sectionH, { marginTop: 20 }]}>
+            Booked Private Viewings ({bookings.length})
+          </Text>
+          {bookings.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTxt}>No private viewings scheduled yet.</Text>
+            </View>
+          ) : (
+            bookings.map((b) => (
+              <View key={b.id} style={styles.bookingCard}>
+                <Text style={styles.bookingName}>{b.canonical_name}</Text>
+                <Text style={styles.bookingMeta}>
+                  {b.buyer_name} · {b.preferred_date}
+                </Text>
+                <Text style={styles.bookingStatus}>✓ {b.status} ({b.id})</Text>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      {/* Clean 3-Item Luxury Bottom Tab Navigation */}
+      <View style={styles.bottomTabs}>
+        {[
+          { id: 'discover', icon: '🏛️', label: 'Discover' },
+          { id: 'advisor', icon: '✦', label: 'AI Advisor' },
+          { id: 'saved', icon: '♡', label: `Saved (${savedIds.length})` },
+        ].map((t) => {
+          const active = activeTab === t.id;
+          return (
+            <TouchableOpacity
+              key={t.id}
+              onPress={() => setActiveTab(t.id as typeof activeTab)}
+              style={styles.bTabItem}
+            >
+              <Text style={[styles.bTabIcon, active && { color: '#e5a96c' }]}>{t.icon}</Text>
+              <Text style={[styles.bTabLbl, active && { color: '#e5a96c' }]}>{t.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* HIDDEN ENGINEERING / MLOPS X-RAY MODAL (For CTOs, Recruiters & Demos) */}
+      <Modal visible={xrayOpen} animationType="slide" transparent>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { maxHeight: '85%' }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={styles.modalTitle}>MLOps Engineering X-Ray</Text>
+              <TouchableOpacity onPress={() => setXrayOpen(false)}>
+                <Text style={{ color: '#e5a96c', fontWeight: '800', fontSize: 14 }}>Close</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ marginTop: 10 }}>
+              <Text style={styles.xrayMeta}>
+                Backend: {connectedMode === 'live' ? 'NestJS + LangGraph + Gemini 4 + SQLite WAL' : 'Cloudflare Edge'}
+              </Text>
+
+              <View style={styles.xrayToggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.xrayToggleTitle}>Hallucination Self-Heal Test</Text>
+                  <Text style={styles.xrayToggleSub}>Injects trap on Iter 1 so Judge loops &amp; heals</Text>
+                </View>
+                <Switch
+                  value={simulateHallucination}
+                  onValueChange={setSimulateHallucination}
+                  trackColor={{ false: '#2a2a32', true: '#e5a96c' }}
+                />
+              </View>
+
+              {lastTrace ? (
+                <View style={{ gap: 8, marginTop: 10 }}>
+                  <Text style={styles.xraySection}>
+                    Langfuse Trace: {lastTrace.traceId} ({lastTrace.totalLatencyMs}ms · $
+                    {lastTrace.totalCostUsd.toFixed(5)})
                   </Text>
-                  {c.topResultNames.map((n, i) => (
-                    <Text key={i} style={styles.relItem}>
-                      {i + 1}. {n}
-                    </Text>
+                  {lastTrace.spans.map((s, idx) => (
+                    <View key={idx} style={styles.xraySpan}>
+                      <Text style={styles.xraySpanName}>{s.name}</Text>
+                      <Text style={styles.xraySpanSub}>
+                        {s.modelUsed || 'Tool'} · {s.latencyMs}ms
+                        {s.metadata?.liveLlmCalled ? ' · LIVE GEMINI 4 ✓' : ''}
+                      </Text>
+                    </View>
+                  ))}
+                  <Text style={[styles.xraySection, { marginTop: 8 }]}>Golden Relevance Benchmark</Text>
+                  {lastTrace.comparisons.map((c, idx) => (
+                    <View key={idx} style={styles.xraySpan}>
+                      <Text style={styles.xraySpanName}>{c.label || c.mode}</Text>
+                      <Text style={styles.xraySpanSub}>
+                        NDCG: {(c.ndcgAt3 ?? c.estimatedNdcgAt5 ?? 0.8).toFixed(3)} ·{' '}
+                        {c.negationTrapCaught ? 'Negation Clean ✓' : 'Trap Leaked ✕'}
+                      </Text>
+                    </View>
                   ))}
                 </View>
-              );
-            })}
+              ) : (
+                <Text style={styles.xrayMeta}>
+                  Ask any question in the AI Advisor tab to inspect the live 5-Agent LangGraph &amp; Langfuse trace here.
+                </Text>
+              )}
+            </ScrollView>
           </View>
-        )}
-      </ScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#070709' },
-  container: { padding: 16, paddingBottom: 48, gap: 14 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  brand: { fontSize: 22, fontWeight: '800', color: '#ffffff' },
-  brandGold: { color: '#e5a96c' },
-  subtitle: { fontSize: 11, color: '#9e9488', marginTop: 2 },
-  liveBadge: {
+  root: { flex: 1, backgroundColor: '#09090b' },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  logo: { fontSize: 24, fontWeight: '900', color: '#ffffff', letterSpacing: -0.5 },
+  logoGold: { color: '#e5a96c' },
+  tagline: { fontSize: 11, color: '#9c948b', marginTop: 1 },
+  devPill: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 99,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+  },
+  devPillText: { color: '#a8a29e', fontSize: 11, fontWeight: '700' },
+  scrollBody: { padding: 18, paddingBottom: 36, gap: 16 },
+  fakeSearchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    borderColor: 'rgba(16,185,129,0.35)',
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 99,
-  },
-  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#34d399' },
-  liveText: { color: '#6ee7b7', fontSize: 10, fontWeight: '700' },
-  tabRow: { flexDirection: 'row', gap: 8 },
-  tabBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 99,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: '#111014',
-    alignItems: 'center',
-  },
-  tabBtnActive: { backgroundColor: '#e5a96c', borderColor: '#e5a96c' },
-  tabText: { color: '#c7bbb0', fontSize: 12, fontWeight: '700' },
-  tabTextActive: { color: '#070709' },
-  searchCard: {
-    backgroundColor: '#121010',
-    borderColor: 'rgba(229,169,108,0.28)',
-    borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
     gap: 12,
-  },
-  kicker: { color: '#e5a96c', fontSize: 10, fontWeight: '800', letterSpacing: 1.4 },
-  input: {
-    backgroundColor: '#070709',
-    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#151418',
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 12,
-    color: '#ffffff',
-    fontSize: 13,
-    minHeight: 68,
-    textAlignVertical: 'top',
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(245,158,11,0.08)',
-    borderColor: 'rgba(245,158,11,0.3)',
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  switchTitle: { color: '#fde68a', fontSize: 12, fontWeight: '700' },
-  switchSub: { color: '#cbd5e1', fontSize: 10, marginTop: 1 },
-  primaryBtn: {
-    backgroundColor: '#e5a96c',
-    borderRadius: 14,
+    borderColor: 'rgba(229,169,108,0.35)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    alignItems: 'center',
   },
-  primaryBtnText: { color: '#070709', fontSize: 12, fontWeight: '900', letterSpacing: 1 },
-  presetScroll: { marginTop: 2 },
-  presetChip: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderColor: 'rgba(255,255,255,0.14)',
+  searchIcon: { color: '#e5a96c', fontSize: 18 },
+  searchMain: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  searchHint: { color: '#8f877e', fontSize: 11, marginTop: 2 },
+  filterChip: {
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: '#131216',
     borderRadius: 99,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     marginRight: 8,
   },
-  presetText: { color: '#f5cfa2', fontSize: 10, fontWeight: '700' },
-  metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  metricBox: {
-    width: '48.5%',
-    backgroundColor: '#100f13',
-    borderColor: 'rgba(255,255,255,0.1)',
+  filterChipActive: { backgroundColor: '#f5efe6', borderColor: '#f5efe6' },
+  filterChipGreen: { backgroundColor: '#34d399', borderColor: '#34d399' },
+  filterTxt: { color: '#d6d3d1', fontSize: 12, fontWeight: '700' },
+  filterTxtActive: { color: '#09090b' },
+  propCard: {
+    backgroundColor: '#121115',
+    borderRadius: 24,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 10,
+    borderColor: 'rgba(255,255,255,0.09)',
   },
-  metricLabel: { color: '#8f867c', fontSize: 9, fontWeight: '800', letterSpacing: 1 },
-  metricVal: { color: '#ffffff', fontSize: 12, fontWeight: '700', marginTop: 4 },
-  metricValGreen: { color: '#34d399', fontSize: 12, fontWeight: '700', marginTop: 4 },
-  metricValGold: { color: '#f5cfa2', fontSize: 12, fontWeight: '700', marginTop: 4 },
-  healBanner: {
-    backgroundColor: 'rgba(245,158,11,0.12)',
-    borderColor: 'rgba(245,158,11,0.45)',
+  cardImageWrap: { height: 220, width: '100%', position: 'relative' },
+  cardImg: { width: '100%', height: '100%' },
+  trustPill: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    backgroundColor: 'rgba(6, 28, 20, 0.88)',
+    borderColor: 'rgba(52, 211, 153, 0.5)',
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 12,
-    gap: 4,
+    borderRadius: 99,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
   },
-  healTitle: { color: '#fcd34d', fontSize: 11, fontWeight: '800' },
-  healBody: { color: '#fef3c7', fontSize: 12, lineHeight: 17 },
-  sectionTitle: { color: '#ffffff', fontSize: 17, fontWeight: '800' },
-  dossierCard: {
-    backgroundColor: '#100f13',
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
-    gap: 12,
+  trustPillDanger: { backgroundColor: 'rgba(46, 10, 18, 0.92)', borderColor: 'rgba(251, 113, 133, 0.6)' },
+  trustPillTxt: { color: '#ffffff', fontSize: 11, fontWeight: '800' },
+  cardHeartBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  dossierCardDanger: { backgroundColor: '#180c0f', borderColor: 'rgba(244,63,94,0.45)' },
-  dossierHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 },
-  microTag: { color: '#e5a96c', fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  propName: { color: '#ffffff', fontSize: 20, fontWeight: '800', marginTop: 3 },
-  priceLine: { color: '#cbd5e1', fontSize: 12, marginTop: 3 },
-  scoreDial: {
-    backgroundColor: 'rgba(16,185,129,0.12)',
-    borderColor: 'rgba(16,185,129,0.45)',
+  cardHeartTxt: { color: '#ffffff', fontSize: 18 },
+  cardContent: { padding: 16, gap: 6 },
+  cardRowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cardMicro: { color: '#a89f94', fontSize: 12, fontWeight: '600' },
+  cardPrice: { color: '#e5a96c', fontSize: 16, fontWeight: '900' },
+  cardTitle: { color: '#ffffff', fontSize: 18, fontWeight: '800' },
+  pillRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
+  infoChip: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  infoChipTxt: { color: '#e7e5e4', fontSize: 11, fontWeight: '700' },
+
+  // Detail Screen
+  detailHeroWrap: { height: 310, width: '100%', position: 'relative' },
+  detailHeroImg: { width: '100%', height: '100%' },
+  heroOverlayTop: {
+    position: 'absolute',
+    top: 16,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  roundIconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roundIconTxt: { color: '#ffffff', fontSize: 20, fontWeight: '700' },
+  detailScoreBadge: {
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    backgroundColor: 'rgba(6, 28, 20, 0.92)',
     borderWidth: 1,
-    borderRadius: 16,
+    borderColor: '#34d399',
+    borderRadius: 99,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    alignItems: 'center',
+    paddingVertical: 7,
   },
-  scoreDialDanger: { backgroundColor: 'rgba(244,63,94,0.15)', borderColor: 'rgba(244,63,94,0.5)' },
-  scoreLabel: { color: '#94a3b8', fontSize: 9, fontWeight: '800' },
-  scoreNum: { color: '#34d399', fontSize: 24, fontWeight: '900' },
-  scoreNumDanger: { color: '#fb7185' },
-  statStrip: { flexDirection: 'row', gap: 8 },
-  statCell: {
+  badgeDanger: { backgroundColor: 'rgba(46, 10, 18, 0.94)', borderColor: '#fb7185' },
+  detailScoreText: { color: '#ffffff', fontSize: 12, fontWeight: '800' },
+  detailBody: { padding: 20, gap: 14 },
+  detailMicro: { color: '#e5a96c', fontSize: 12, fontWeight: '700', letterSpacing: 0.6 },
+  detailTitle: { color: '#ffffff', fontSize: 26, fontWeight: '900' },
+  detailPrice: { color: '#ffffff', fontSize: 22, fontWeight: '800' },
+  detailPriceUsd: { color: '#9c948b', fontSize: 15, fontWeight: '500' },
+  checkGrid: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  checkCard: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: 10,
-  },
-  statLbl: { color: '#8f867c', fontSize: 9, fontWeight: '800' },
-  statVal: { color: '#ffffff', fontSize: 13, fontWeight: '800', marginTop: 3 },
-  statWarn: { color: '#fcd34d', fontSize: 9, marginTop: 2 },
-  statSub: { color: '#94a3b8', fontSize: 9, marginTop: 2 },
-  compareBox: {
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderWidth: 1,
-    borderRadius: 14,
+    backgroundColor: '#141318',
+    borderRadius: 16,
     padding: 12,
-    gap: 4,
-  },
-  truthBox: { backgroundColor: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.3)' },
-  brokerTag: { color: '#fda4af', fontSize: 10, fontWeight: '800' },
-  brokerText: { color: '#cbd5e1', fontSize: 12, fontStyle: 'italic' },
-  truthTag: { color: '#6ee7b7', fontSize: 10, fontWeight: '800' },
-  truthText: { color: '#ffffff', fontSize: 12, lineHeight: 17 },
-  citeHeading: { color: '#9e9488', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
-  citeCard: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 10,
-    gap: 3,
   },
-  citeMeta: { color: '#e5a96c', fontSize: 10, fontWeight: '700' },
-  citeQuote: { color: '#e2e8f0', fontSize: 12, lineHeight: 17 },
-  ctaRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  outlineBtn: {
-    flex: 1.4,
-    borderColor: 'rgba(229,169,108,0.5)',
-    backgroundColor: 'rgba(229,169,108,0.12)',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  outlineBtnText: { color: '#f5cfa2', fontSize: 11, fontWeight: '800' },
-  whiteBtn: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  whiteBtnText: { color: '#070709', fontSize: 11, fontWeight: '900' },
-  trapsCard: {
-    backgroundColor: '#160c0f',
-    borderColor: 'rgba(244,63,94,0.35)',
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
-    gap: 10,
-  },
-  trapsTitle: { color: '#fda4af', fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
-  trapItem: { backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, padding: 10, gap: 4 },
-  trapName: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
-  trapReason: { color: '#fda4af', fontSize: 11 },
-  xrayCard: {
-    backgroundColor: '#100f13',
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
-    gap: 10,
-  },
-  spanRow: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderColor: 'rgba(52,211,153,0.35)',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    gap: 4,
-  },
-  spanName: { color: '#ffffff', fontSize: 12, fontWeight: '800' },
-  spanMeta: { color: '#94a3b8', fontSize: 11 },
-  relCard: {
-    backgroundColor: '#100f13',
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1,
-    borderRadius: 18,
+  checkLabel: { color: '#8f877e', fontSize: 10, fontWeight: '700' },
+  checkVal: { color: '#34d399', fontSize: 14, fontWeight: '900', marginTop: 4 },
+  checkSub: { color: '#a8a29e', fontSize: 10, marginTop: 2 },
+  truthSection: { gap: 10, marginTop: 6 },
+  sectionH: { color: '#ffffff', fontSize: 16, fontWeight: '800' },
+  brokerCard: {
+    backgroundColor: '#141318',
+    borderRadius: 16,
     padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  brokerLbl: { color: '#a8a29e', fontSize: 11, fontWeight: '700', marginBottom: 4 },
+  brokerTxt: { color: '#d6d3d1', fontSize: 13, fontStyle: 'italic', lineHeight: 19 },
+  realityCard: {
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.35)',
+  },
+  realityCardDanger: { backgroundColor: 'rgba(244,63,94,0.1)', borderColor: 'rgba(244,63,94,0.45)' },
+  realityLbl: { color: '#6ee7b7', fontSize: 11, fontWeight: '800', marginBottom: 4 },
+  realityTxt: { color: '#ffffff', fontSize: 13, lineHeight: 20 },
+  evCard: {
+    backgroundColor: '#141318',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     gap: 6,
   },
-  relHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  relTitle: { color: '#ffffff', fontSize: 13, fontWeight: '800', flex: 1 },
-  relBadge: { color: '#34d399', fontSize: 10, fontWeight: '900' },
-  relScores: { color: '#f5cfa2', fontSize: 12, fontWeight: '700' },
-  relItem: { color: '#cbd5e1', fontSize: 12 },
+  evAuthor: { color: '#e5a96c', fontSize: 11, fontWeight: '800' },
+  evDate: { color: '#78716c', fontSize: 10 },
+  evQuote: { color: '#f5f5f4', fontSize: 13, lineHeight: 19 },
+  dossierBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(229,169,108,0.5)',
+    backgroundColor: 'rgba(229,169,108,0.12)',
+    borderRadius: 16,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  dossierBtnText: { color: '#f5cfa2', fontSize: 13, fontWeight: '800' },
+  stickyFooter: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#111014',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  footerPrice: { color: '#ffffff', fontSize: 18, fontWeight: '900' },
+  footerSub: { color: '#9c948b', fontSize: 11 },
+  bookBtn: { backgroundColor: '#e5a96c', borderRadius: 14, paddingHorizontal: 20, paddingVertical: 13 },
+  bookBtnText: { color: '#09090b', fontSize: 13, fontWeight: '900' },
+
+  // Chat
+  chatBody: { padding: 16, gap: 12, paddingBottom: 24 },
+  msgBubble: { borderRadius: 20, padding: 14, maxWidth: '92%' },
+  msgUser: { alignSelf: 'flex-end', backgroundColor: '#e5a96c' },
+  msgAssistant: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#16151a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.09)',
+  },
+  msgUserTxt: { color: '#09090b', fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  msgAiTxt: { color: '#f5f5f4', fontSize: 14, lineHeight: 21 },
+  chatPropCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#0c0b0e',
+    borderRadius: 14,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  chatPropThumb: { width: 62, height: 62, borderRadius: 10 },
+  chatPropName: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
+  chatPropMeta: { color: '#a8a29e', fontSize: 11, marginTop: 2 },
+  chatPropScore: { color: '#34d399', fontSize: 11, fontWeight: '700', marginTop: 3 },
+  trapsFoot: { color: '#fda4af', fontSize: 11, marginTop: 10, fontWeight: '600' },
+  quickLabel: { color: '#8f877e', fontSize: 12, fontWeight: '700' },
+  quickChip: {
+    backgroundColor: '#141318',
+    borderWidth: 1,
+    borderColor: 'rgba(229,169,108,0.28)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  quickChipTxt: { color: '#f5cfa2', fontSize: 12, fontWeight: '600' },
+  chatInputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#0f0e12',
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#19181e',
+    borderRadius: 99,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    color: '#ffffff',
+    fontSize: 14,
+  },
+  sendBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#e5a96c',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnTxt: { color: '#09090b', fontSize: 20, fontWeight: '900' },
+
+  // Saved
+  emptyCard: { backgroundColor: '#141318', borderRadius: 16, padding: 20, alignItems: 'center' },
+  emptyTxt: { color: '#8f877e', fontSize: 13 },
+  savedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#141318',
+    borderRadius: 16,
+    padding: 10,
+  },
+  savedThumb: { width: 64, height: 64, borderRadius: 12 },
+  bookingCard: {
+    backgroundColor: '#101915',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.35)',
+    borderRadius: 16,
+    padding: 14,
+    gap: 4,
+  },
+  bookingName: { color: '#ffffff', fontSize: 15, fontWeight: '800' },
+  bookingMeta: { color: '#cbd5e1', fontSize: 12 },
+  bookingStatus: { color: '#34d399', fontSize: 11, fontWeight: '800', marginTop: 2 },
+
+  // Bottom Navigation
+  bottomTabs: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#0d0c10',
+    paddingVertical: 10,
+  },
+  bTabItem: { flex: 1, alignItems: 'center', gap: 3 },
+  bTabIcon: { color: '#78716c', fontSize: 18 },
+  bTabLbl: { color: '#78716c', fontSize: 11, fontWeight: '700' },
+
+  // Modals
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#141318',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 22,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  modalTitle: { color: '#ffffff', fontSize: 19, fontWeight: '900' },
+  modalSub: { color: '#a8a29e', fontSize: 13, lineHeight: 18 },
+  modalInput: {
+    backgroundColor: '#09090b',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#ffffff',
+    fontSize: 14,
+  },
+  modalBtnPrimary: { backgroundColor: '#e5a96c', borderRadius: 14, paddingVertical: 13, alignItems: 'center' },
+  modalBtnPriTxt: { color: '#09090b', fontSize: 13, fontWeight: '900' },
+  modalBtnSecondary: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  modalBtnSecTxt: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+  xrayMeta: { color: '#9c948b', fontSize: 12, marginBottom: 10 },
+  xrayToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(229,169,108,0.1)',
+    borderRadius: 14,
+    padding: 12,
+  },
+  xrayToggleTitle: { color: '#f5cfa2', fontSize: 13, fontWeight: '800' },
+  xrayToggleSub: { color: '#cbd5e1', fontSize: 11 },
+  xraySection: { color: '#34d399', fontSize: 12, fontWeight: '800' },
+  xraySpan: {
+    backgroundColor: '#0a090d',
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  xraySpanName: { color: '#ffffff', fontSize: 12, fontWeight: '700' },
+  xraySpanSub: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
 });

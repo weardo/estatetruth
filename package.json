@@ -8,13 +8,14 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/main.js",
     "start:dev": "tsc -p tsconfig.json && node dist/src/main.js",
-    "eval": "tsx evals/run-evals.ts",
-    "eval:ci": "tsx evals/run-evals.ts --ci",
+    "eval": "SKIP_LIVE_LLM=1 tsx evals/run-evals.ts",
+    "eval:ci": "SKIP_LIVE_LLM=1 tsx evals/run-evals.ts --ci",
     "mcp:start": "tsx packages/mcp-server/src/index.ts",
     "test": "tsx --test evals/relevance.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@google/genai": "^3.6.1",
     "@langchain/core": "^0.3.42",
     "@langchain/langgraph": "^0.2.56",
     "@modelcontextprotocol/sdk": "^1.8.0",

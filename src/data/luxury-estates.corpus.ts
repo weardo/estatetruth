@@ -15,6 +15,7 @@ export interface LuxuryPropertyEntity {
   developer: string;
   city: 'Mumbai' | 'Dubai';
   microMarket: string;
+  heroImage: string;
   lat: number;
   lng: number;
   priceCroreInr: number; // e.g., 28.5 = ₹28.5 Cr
@@ -54,6 +55,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Macrotech Developers (Lodha)',
     city: 'Mumbai',
     microMarket: 'Worli Sea Face',
+    heroImage: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=85',
     lat: 19.0094,
     lng: 72.8152,
     priceCroreInr: 34.0,
@@ -131,6 +133,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Oberoi Realty',
     city: 'Mumbai',
     microMarket: 'Worli',
+    heroImage: 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=85',
     lat: 19.0022,
     lng: 72.8186,
     priceCroreInr: 68.0,
@@ -197,6 +200,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'K Raheja Corp',
     city: 'Mumbai',
     microMarket: 'Pali Hill, Bandra West',
+    heroImage: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=85',
     lat: 19.0641,
     lng: 72.8258,
     priceCroreInr: 26.5,
@@ -273,6 +277,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Apex Urban Realty',
     city: 'Mumbai',
     microMarket: 'Lower Parel',
+    heroImage: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=85',
     lat: 18.9965,
     lng: 72.8261,
     priceCroreInr: 22.0,
@@ -353,6 +358,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Shapoorji Pallonji Luxury',
     city: 'Mumbai',
     microMarket: 'Malabar Hill',
+    heroImage: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=85',
     lat: 18.9522,
     lng: 72.7988,
     priceCroreInr: 48.0,
@@ -420,6 +426,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'OMNIYAT',
     city: 'Dubai',
     microMarket: 'Palm Jumeirah Crescent',
+    heroImage: 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&q=85',
     lat: 25.1068,
     lng: 55.1255,
     priceCroreInr: 62.0,
@@ -487,6 +494,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Meridian Gulf Developments',
     city: 'Dubai',
     microMarket: 'Dubai Marina',
+    heroImage: 'https://images.unsplash.com/photo-1518684079-3c830dcef090?auto=format&fit=crop&w=1200&q=85',
     lat: 25.0785,
     lng: 55.1349,
     priceCroreInr: 24.0,
@@ -549,6 +557,7 @@ export const LUXURY_ESTATES_CORPUS: LuxuryPropertyEntity[] = [
     developer: 'Adani Realty & Radius',
     city: 'Mumbai',
     microMarket: 'Bandra Kurla Complex (BKC)',
+    heroImage: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1200&q=85',
     lat: 19.0658,
     lng: 72.8644,
     priceCroreInr: 19.5,

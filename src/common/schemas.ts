@@ -34,6 +34,8 @@ export const VerifiedCitationSchema = z.object({
 export const PropertyDossierSchema = z.object({
   propertyId: z.string(),
   canonicalName: z.string(),
+  developer: z.string().optional(),
+  heroImage: z.string().optional(),
   microMarket: z.string(),
   city: z.enum(['Mumbai', 'Dubai']),
   priceCroreInr: z.number(),
