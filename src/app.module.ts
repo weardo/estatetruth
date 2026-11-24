@@ -9,6 +9,7 @@ import { MessagingController } from './modules/messaging/messaging.controller';
 import { DatabaseService } from './modules/storage/database.service';
 import { GeminiLlmService } from './modules/llm/gemini-llm.service';
 import { LiveGeoService } from './modules/geo/live-geo.service';
+import { BuyerToolsService } from './modules/tools/buyer-tools.service';
 
 @Module({
   imports: [],
@@ -17,6 +18,7 @@ import { LiveGeoService } from './modules/geo/live-geo.service';
     DatabaseService,
     GeminiLlmService,
     LiveGeoService,
+    BuyerToolsService,
     ObservabilityService,
     HybridSearchService,
     MultiAgentOrchestratorService,

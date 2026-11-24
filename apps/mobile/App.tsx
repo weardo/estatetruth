@@ -30,7 +30,55 @@ import { ESTATETRUTH_TOKENS as T } from './tokens';
 
 const API_BASE_LAN = 'http://192.168.1.53:4000/api';
 const API_FALLBACK_EDGE = 'https://demos.soupup.ai/api/estatetruth/query';
+const API_EDGE_BASE = 'https://demos.soupup.ai/api/estatetruth';
 const USER_ID = 'android_hni_client';
+
+interface TrueCostBreakdown {
+  city: 'Mumbai' | 'Dubai';
+  basePriceCrore: number;
+  stampDutyOrDldCrore: number;
+  gstCrore: number;
+  hiddenBuilderChargesCrore: number;
+  totalAllInCrore: number;
+  hiddenCostDeltaCrore: number;
+  hiddenCostPct: number;
+  carpetLoadingPct: number;
+  nonUsableSqFt: number;
+  moneyPaidForWallsAndLobbiesCrore: number;
+  advertisedPricePerSqFtInr: number;
+  trueCarpetPricePerSqFtInr: number;
+  nriComplianceNote: string;
+  lineItems: Array<{ label: string; amountCrore: number; note: string }>;
+}
+
+interface AgreementScanResult {
+  verdict: 'DO_NOT_SIGN_AS_IS' | 'NEGOTIATE_BEFORE_SIGNING' | 'GENERALLY_FAIR';
+  riskScore: number;
+  executiveSummary: string;
+  redFlags: Array<{
+    severity: 'HIGH' | 'MEDIUM' | 'INFO';
+    clauseTitle: string;
+    riskSummary: string;
+    legalBasis: string;
+    recommendedCounterClause: string;
+  }>;
+  modelUsed: string;
+  liveLlmCalled: boolean;
+  latencyMs: number;
+}
+
+const SAMPLE_AGREEMENTS = [
+  {
+    label: 'Sample 01 · Mumbai Predatory Allotment',
+    city: 'Mumbai' as const,
+    text: 'Allotment Letter Clause 4: The flat is billed on 4,850 sq.ft. Super Built-up Area. In case of buyer cancellation, 18% of total consideration shall be forfeited by the Promoter. Delay in possession due to market conditions shall grant the Promoter an automatic 24-month grace period without interest. Token amount of Rs 2.5 Cr must be wired to Director Personal Account before RERA registration.',
+  },
+  {
+    label: 'Sample 02 · Dubai Escrow Bypass Pitch',
+    city: 'Dubai' as const,
+    text: 'Exclusive Palm Penthouse Offer: 12% guaranteed rental assured return for 5 years! Wire 20% booking deposit directly to broker personal account today to lock tentative handover date with sole discretion extension clause.',
+  },
+];
 
 interface EvidenceItem {
   source: string;
@@ -185,9 +233,25 @@ export default function App() {
     Inter_600SemiBold,
   });
 
-  const [activeTab, setActiveTab] = useState<'index' | 'counsel' | 'vault'>('index');
+  const [activeTab, setActiveTab] = useState<'index' | 'counsel' | 'tools' | 'vault'>('index');
   const [cityFilter, setCityFilter] = useState<'All' | 'Mumbai' | 'Dubai'>('All');
   const [safeOnly, setSafeOnly] = useState(false);
+
+  // 03 TOOLS: Forensic Buyer Utilities State
+  const [toolTab, setToolTab] = useState<'cost' | 'scanner'>('cost');
+  const [costCity, setCostCity] = useState<'Mumbai' | 'Dubai'>('Mumbai');
+  const [costPriceCr, setCostPriceCr] = useState('34');
+  const [costAdvSqFt, setCostAdvSqFt] = useState('4850');
+  const [costCarpetSqFt, setCostCarpetSqFt] = useState('3420');
+  const [costUnderConst, setCostUnderConst] = useState(true);
+  const [costNri, setCostNri] = useState(true);
+  const [costResult, setCostResult] = useState<TrueCostBreakdown | null>(null);
+  const [costLoading, setCostLoading] = useState(false);
+
+  const [scanCity, setScanCity] = useState<'Mumbai' | 'Dubai'>('Mumbai');
+  const [scanText, setScanText] = useState(SAMPLE_AGREEMENTS[0].text);
+  const [scanResult, setScanResult] = useState<AgreementScanResult | null>(null);
+  const [scanLoading, setScanLoading] = useState(false);
 
   const [properties, setProperties] = useState<PropertyItem[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<PropertyItem | null>(null);
@@ -252,6 +316,75 @@ export default function App() {
     fetchFeed(cityFilter, safeOnly);
     fetchBookings();
   }, [cityFilter, safeOnly]);
+
+  const runTrueCostAudit = async () => {
+    setCostLoading(true);
+    const payload = {
+      city: costCity,
+      agreementPriceCroreInr: Number(costPriceCr) || 34,
+      advertisedSqFt: Number(costAdvSqFt) || 4850,
+      reraCarpetSqFt: Number(costCarpetSqFt) || 3420,
+      isUnderConstruction: costUnderConst,
+      isNriTransaction: costNri,
+    };
+    let data: { breakdown?: TrueCostBreakdown } | null = null;
+    try {
+      const res = await fetch(`${API_BASE_LAN}/tools/true-cost`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) data = await res.json();
+    } catch {
+      try {
+        const res = await fetch(`${API_EDGE_BASE}/tools/true-cost`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) data = await res.json();
+      } catch {
+        // ignore
+      }
+    }
+    if (data?.breakdown) setCostResult(data.breakdown);
+    setCostLoading(false);
+  };
+
+  const runAgreementAudit = async (overrideText?: string, overrideCity?: 'Mumbai' | 'Dubai') => {
+    const textToScan = (overrideText ?? scanText).trim();
+    const cityToUse = overrideCity ?? scanCity;
+    if (!textToScan || scanLoading) return;
+    setScanLoading(true);
+    let data: { scan?: AgreementScanResult } | null = null;
+    try {
+      const res = await fetch(`${API_BASE_LAN}/tools/scan-agreement`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textToScan, city: cityToUse }),
+      });
+      if (res.ok) data = await res.json();
+    } catch {
+      try {
+        const res = await fetch(`${API_EDGE_BASE}/tools/scan-agreement`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: textToScan, city: cityToUse }),
+        });
+        if (res.ok) data = await res.json();
+      } catch {
+        // ignore
+      }
+    }
+    if (data?.scan) setScanResult(data.scan);
+    setScanLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'tools' && !costResult) {
+      runTrueCostAudit();
+    }
+  }, [activeTab]);
 
   const handleToggleSave = async (prop: PropertyItem) => {
     const currentlySaved = savedIds.includes(prop.id);
@@ -683,15 +816,20 @@ export default function App() {
 
               {/* Quiet Editorial Counsel Prompt Strip */}
               <View style={styles.counselBanner}>
-                <Text style={styles.kickerBrass}>PRIVATE COUNSEL</Text>
+                <Text style={styles.kickerBrass}>PRIVATE COUNSEL &amp; FORENSIC TOOLS</Text>
                 <Text style={styles.serifH2}>
-                  Eliminate broker hype, hidden RERA disputes &amp; highway noise before you tour.
+                  Eliminate broker hype, hidden RERA disputes &amp; predatory clauses before you tour.
                 </Text>
-                <View style={{ marginTop: 14 }}>
+                <View style={{ flexDirection: 'row', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
                   <TactileButton
-                    label="CONSULT PRIVATE AI ADVISOR"
+                    label="PRIVATE AI ADVISOR"
                     onPress={() => setActiveTab('counsel')}
                     variant="ink"
+                  />
+                  <TactileButton
+                    label="COST &amp; CLAUSE X-RAY"
+                    onPress={() => setActiveTab('tools')}
+                    variant="alabaster"
                   />
                 </View>
               </View>
@@ -857,7 +995,323 @@ export default function App() {
         </View>
       )}
 
-      {/* TAB 3: VAULT — Archived Shortlist & Private Appointments (SQLite) */}
+      {/* TAB 3: FORENSIC TOOLS — True Cost X-Ray & Agreement Red-Flag Scanner */}
+      {activeTab === 'tools' && (
+        <ScrollView contentContainerStyle={{ padding: 20, gap: 20, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+          <View>
+            <Text style={styles.kickerBrass}>BUYER-ONLY FORENSIC SUITE</Text>
+            <Text style={styles.serifH1}>Verify before you wire.</Text>
+          </View>
+
+          {/* Hairline Sub-Tab Switcher */}
+          <View style={styles.toolSubTabs}>
+            {[
+              { id: 'cost', label: '01 · TRUE COST X-RAY' },
+              { id: 'scanner', label: '02 · CLAUSE SCANNER' },
+            ].map((t) => {
+              const active = toolTab === t.id;
+              return (
+                <Pressable
+                  key={t.id}
+                  onPress={() => setToolTab(t.id as 'cost' | 'scanner')}
+                  style={[styles.toolSubTab, active && styles.toolSubTabActive]}
+                >
+                  <Text style={[styles.toolSubTabTxt, active && { color: T.colors.ink }]}>{t.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {toolTab === 'cost' ? (
+            <View style={{ gap: 18 }}>
+              <View style={styles.toolCard}>
+                <Text style={styles.metaUpper}>JURISDICTION</Text>
+                <View style={styles.citySegment}>
+                  {(['Mumbai', 'Dubai'] as const).map((c) => {
+                    const active = costCity === c;
+                    return (
+                      <Pressable
+                        key={c}
+                        onPress={() => setCostCity(c)}
+                        style={[styles.citySegBtn, active && { backgroundColor: T.colors.ink }]}
+                      >
+                        <Text style={[styles.citySegTxt, active && { color: T.colors.canvas }]}>
+                          {c === 'Mumbai' ? 'MUMBAI · MAHARERA' : 'DUBAI · DLD'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={{ gap: 4 }}>
+                  <Text style={styles.ledgerLabel}>QUOTED AGREEMENT PRICE (₹ CRORE)</Text>
+                  <TextInput
+                    value={costPriceCr}
+                    onChangeText={setCostPriceCr}
+                    keyboardType="numeric"
+                    style={styles.underlineInput}
+                  />
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 14 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ledgerLabel}>ADVERTISED SQ.FT.</Text>
+                    <TextInput
+                      value={costAdvSqFt}
+                      onChangeText={setCostAdvSqFt}
+                      keyboardType="numeric"
+                      style={styles.underlineInput}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.ledgerLabel}>RERA CARPET SQ.FT.</Text>
+                    <TextInput
+                      value={costCarpetSqFt}
+                      onChangeText={setCostCarpetSqFt}
+                      keyboardType="numeric"
+                      style={styles.underlineInput}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.rowBetween}>
+                  <Text style={styles.evTag}>Under-Construction (+5% GST)</Text>
+                  <Switch
+                    value={costUnderConst}
+                    onValueChange={setCostUnderConst}
+                    trackColor={{ false: T.colors.hairline, true: T.colors.ink }}
+                    thumbColor={T.colors.canvas}
+                  />
+                </View>
+
+                <View style={styles.rowBetween}>
+                  <Text style={styles.evTag}>NRI Buyer / Seller (FEMA / Sec 195)</Text>
+                  <Switch
+                    value={costNri}
+                    onValueChange={setCostNri}
+                    trackColor={{ false: T.colors.hairline, true: T.colors.ink }}
+                    thumbColor={T.colors.canvas}
+                  />
+                </View>
+
+                <TactileButton
+                  label={costLoading ? 'CALCULATING…' : 'RUN TRUE COST X-RAY'}
+                  onPress={runTrueCostAudit}
+                  disabled={costLoading}
+                  variant="ink"
+                  fullWidth
+                />
+              </View>
+
+              {costResult && (
+                <View style={styles.toolCard}>
+                  <View style={styles.rowBetween}>
+                    <View>
+                      <Text style={styles.kickerBrass}>TRUE ALL-IN LANDING COST</Text>
+                      <Text style={styles.serifH1}>₹{costResult.totalAllInCrore.toFixed(2)} Cr</Text>
+                    </View>
+                    <View style={[styles.miniStamp, { borderColor: T.colors.oxblood }]}>
+                      <Text style={[styles.inkStampSub, { color: T.colors.oxblood }]}>HIDDEN DELTA</Text>
+                      <Text style={[styles.miniStampVal, { color: T.colors.oxblood }]}>
+                        +₹{costResult.hiddenCostDeltaCrore.toFixed(2)} Cr
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.ledgerGrid}>
+                    <View style={[styles.ledgerCell, styles.ledgerCellBorderRight]}>
+                      <Text style={styles.ledgerLabel}>PAID FOR WALLS</Text>
+                      <Text style={[styles.ledgerVal, { color: T.colors.oxblood }]}>
+                        ₹{costResult.moneyPaidForWallsAndLobbiesCrore.toFixed(2)} Cr
+                      </Text>
+                      <Text style={styles.ledgerSub}>+{costResult.carpetLoadingPct}% loading</Text>
+                    </View>
+                    <View style={styles.ledgerCell}>
+                      <Text style={styles.ledgerLabel}>TRUE CARPET RATE</Text>
+                      <Text style={styles.ledgerVal}>
+                        ₹{costResult.trueCarpetPricePerSqFtInr.toLocaleString()}
+                      </Text>
+                      <Text style={styles.ledgerSub}>
+                        vs ₹{costResult.advertisedPricePerSqFtInr.toLocaleString()}/sq.ft.
+                      </Text>
+                    </View>
+                  </View>
+
+                  {costResult.lineItems.map((item, idx) => (
+                    <View key={idx} style={styles.evidenceRow}>
+                      <View style={styles.rowBetween}>
+                        <Text style={[styles.evTag, { flex: 1, paddingRight: 8 }]}>{item.label}</Text>
+                        <Text style={styles.evTag}>₹{item.amountCrore.toFixed(2)} Cr</Text>
+                      </View>
+                      <Text style={styles.evDate}>{item.note}</Text>
+                    </View>
+                  ))}
+
+                  <View style={styles.comparisonBlock}>
+                    <Text style={styles.kickerBrass}>STATUTORY &amp; TAX BRIEF</Text>
+                    <Text style={[styles.bodyEditorial, { marginTop: 4 }]}>{costResult.nriComplianceNote}</Text>
+                  </View>
+
+                  <TactileButton
+                    label="SHARE COST X-RAY"
+                    onPress={() => {
+                      Share.share({
+                        message: `EstateTruth True Landing Cost X-Ray (${costResult.city})\n• Quoted: ₹${costResult.basePriceCrore} Cr → True All-In: ₹${costResult.totalAllInCrore} Cr (+₹${costResult.hiddenCostDeltaCrore} Cr hidden)\n• Paid for Walls/Lobbies: ₹${costResult.moneyPaidForWallsAndLobbiesCrore} Cr (${costResult.carpetLoadingPct}% loading)\n• True Carpet Rate: ₹${costResult.trueCarpetPricePerSqFtInr.toLocaleString()}/sq.ft\nAudit free: https://demos.soupup.ai/estatetruth`,
+                      }).catch(() => {});
+                    }}
+                    variant="alabaster"
+                    fullWidth
+                  />
+                </View>
+              )}
+            </View>
+          ) : (
+            <View style={{ gap: 18 }}>
+              <View style={styles.toolCard}>
+                <Text style={styles.kickerBrass}>BUILDER AGREEMENT &amp; PITCH AUDITOR</Text>
+                <View style={styles.citySegment}>
+                  {(['Mumbai', 'Dubai'] as const).map((c) => {
+                    const active = scanCity === c;
+                    return (
+                      <Pressable
+                        key={c}
+                        onPress={() => setScanCity(c)}
+                        style={[styles.citySegBtn, active && { backgroundColor: T.colors.ink }]}
+                      >
+                        <Text style={[styles.citySegTxt, active && { color: T.colors.canvas }]}>
+                          {c === 'Mumbai' ? 'MUMBAI · MAHARERA' : 'DUBAI · DLD'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                <View style={{ gap: 8 }}>
+                  <Text style={styles.ledgerLabel}>TAP A SAMPLE PREDATORY CLAUSE</Text>
+                  {SAMPLE_AGREEMENTS.map((s) => (
+                    <Pressable
+                      key={s.label}
+                      onPress={() => {
+                        setScanCity(s.city);
+                        setScanText(s.text);
+                        runAgreementAudit(s.text, s.city);
+                      }}
+                      style={styles.sampleBtn}
+                    >
+                      <Text style={styles.evTag}>{s.label}</Text>
+                      <Text style={styles.metaUpper}>RUN →</Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <TextInput
+                  value={scanText}
+                  onChangeText={setScanText}
+                  multiline
+                  numberOfLines={5}
+                  placeholder="Paste builder allotment letter clause or WhatsApp broker pitch…"
+                  placeholderTextColor={T.colors.inkMuted}
+                  style={styles.textAreaInput}
+                />
+
+                <TactileButton
+                  label={scanLoading ? 'AUDITING CLAUSES…' : 'SCAN FOR LEGAL RED FLAGS'}
+                  onPress={() => runAgreementAudit()}
+                  disabled={scanLoading || !scanText.trim()}
+                  variant="ink"
+                  fullWidth
+                />
+              </View>
+
+              {scanResult && (
+                <View style={styles.toolCard}>
+                  <View style={styles.rowBetween}>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <Text style={styles.ledgerLabel}>
+                        {scanResult.liveLlmCalled ? `LIVE ${scanResult.modelUsed.toUpperCase()}` : 'RERA / DLD LEGAL GUARDRAIL'} · {scanResult.latencyMs}MS
+                      </Text>
+                      <Text style={[styles.evText, { color: T.colors.ink, marginTop: 4 }]}>
+                        {scanResult.executiveSummary}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.miniStamp,
+                        {
+                          borderColor:
+                            scanResult.verdict === 'DO_NOT_SIGN_AS_IS' ? T.colors.oxblood : T.colors.forest,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.inkStampSub,
+                          {
+                            color:
+                              scanResult.verdict === 'DO_NOT_SIGN_AS_IS' ? T.colors.oxblood : T.colors.forest,
+                          },
+                        ]}
+                      >
+                        {scanResult.verdict === 'DO_NOT_SIGN_AS_IS' ? 'DO NOT SIGN' : 'NEGOTIATE'}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.miniStampVal,
+                          {
+                            color:
+                              scanResult.verdict === 'DO_NOT_SIGN_AS_IS' ? T.colors.oxblood : T.colors.forest,
+                          },
+                        ]}
+                      >
+                        {scanResult.riskScore}/100
+                      </Text>
+                    </View>
+                  </View>
+
+                  {scanResult.redFlags.map((flag, i) => (
+                    <View key={i} style={styles.evidenceRow}>
+                      <Text
+                        style={[
+                          styles.metaUpper,
+                          { color: flag.severity === 'HIGH' ? T.colors.oxblood : T.colors.brass },
+                        ]}
+                      >
+                        {String(i + 1).padStart(2, '0')} · {flag.severity} SEVERITY
+                      </Text>
+                      <Text style={styles.inlineLotTitle}>{flag.clauseTitle}</Text>
+                      <Text style={styles.evDate}>{flag.legalBasis}</Text>
+                      <Text style={styles.evText}>{flag.riskSummary}</Text>
+                      <View style={styles.counterBox}>
+                        <Text style={styles.ledgerLabel}>RECOMMENDED COUNTER-CLAUSE</Text>
+                        <Text style={[styles.evText, { color: T.colors.ink, marginTop: 3 }]}>
+                          {flag.recommendedCounterClause}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+
+                  <TactileButton
+                    label="SHARE LEGAL AUDIT"
+                    onPress={() => {
+                      const topFlags = scanResult.redFlags
+                        .slice(0, 3)
+                        .map((f, idx) => `${idx + 1}. [${f.severity}] ${f.clauseTitle} (${f.legalBasis})`)
+                        .join('\n');
+                      Share.share({
+                        message: `EstateTruth Legal Red-Flag Audit\n• Verdict: ${scanResult.verdict.replace(/_/g, ' ')} (Risk ${scanResult.riskScore}/100)\n${topFlags}\nAudit free: https://demos.soupup.ai/estatetruth`,
+                      }).catch(() => {});
+                    }}
+                    variant="alabaster"
+                    fullWidth
+                  />
+                </View>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      {/* TAB 4: VAULT — Archived Shortlist & Private Appointments (SQLite) */}
       {activeTab === 'vault' && (
         <ScrollView contentContainerStyle={{ padding: 20, gap: 22 }}>
           <View>
@@ -918,7 +1372,8 @@ export default function App() {
         {[
           { id: 'index', num: '01', label: 'INDEX' },
           { id: 'counsel', num: '02', label: 'COUNSEL' },
-          { id: 'vault', num: '03', label: `VAULT (${savedIds.length})` },
+          { id: 'tools', num: '03', label: 'TOOLS' },
+          { id: 'vault', num: '04', label: `VAULT (${savedIds.length})` },
         ].map((item) => {
           const active = activeTab === item.id;
           return (
@@ -1398,5 +1853,93 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 12,
     gap: 10,
+  },
+
+  // 03 TOOLS Forensic Suite
+  toolSubTabs: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: T.colors.hairline,
+  },
+  toolSubTab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  toolSubTabActive: { borderBottomColor: T.colors.ink },
+  toolSubTabTxt: {
+    fontFamily: T.typography.sansSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: T.colors.inkMuted,
+  },
+  toolCard: {
+    backgroundColor: T.colors.surface,
+    borderWidth: 1,
+    borderColor: T.colors.ink,
+    padding: 18,
+    gap: 14,
+  },
+  citySegment: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: T.colors.ink,
+  },
+  citySegBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: T.colors.surface,
+  },
+  citySegTxt: {
+    fontFamily: T.typography.sansSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    color: T.colors.ink,
+  },
+  miniStamp: {
+    borderWidth: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    alignItems: 'center',
+    backgroundColor: T.colors.canvas,
+    transform: [{ rotate: '-3deg' }],
+  },
+  miniStampVal: {
+    fontFamily: T.typography.serifSemiBold,
+    fontSize: 18,
+    lineHeight: 20,
+    marginTop: 2,
+  },
+  sampleBtn: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: T.colors.hairline,
+    backgroundColor: T.colors.canvas,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  textAreaInput: {
+    borderWidth: 1,
+    borderColor: T.colors.ink,
+    backgroundColor: T.colors.canvas,
+    padding: 12,
+    minHeight: 110,
+    textAlignVertical: 'top',
+    fontFamily: T.typography.sansRegular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: T.colors.ink,
+  },
+  counterBox: {
+    borderLeftWidth: 2,
+    borderLeftColor: T.colors.ink,
+    backgroundColor: T.colors.canvas,
+    padding: 10,
+    marginTop: 4,
   },
 });

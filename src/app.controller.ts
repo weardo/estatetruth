@@ -7,6 +7,7 @@ import { IngestionService, RawListingIngestJob } from './modules/ingestion/inges
 import { HybridSearchService } from './modules/search/hybrid-search.service';
 import { DatabaseService } from './modules/storage/database.service';
 import { GeminiLlmService } from './modules/llm/gemini-llm.service';
+import { BuyerToolsService, TrueCostInput } from './modules/tools/buyer-tools.service';
 
 @Controller('api')
 export class AppController {
@@ -17,7 +18,8 @@ export class AppController {
     private readonly ingestion: IngestionService,
     private readonly search: HybridSearchService,
     private readonly db: DatabaseService,
-    private readonly llm: GeminiLlmService
+    private readonly llm: GeminiLlmService,
+    private readonly buyerTools: BuyerToolsService
   ) {}
 
   @Get('health')
@@ -290,5 +292,35 @@ export class AppController {
   @Post('ingestion/enqueue')
   enqueueIngestion(@Body() body: RawListingIngestJob) {
     return this.ingestion.enqueuePropertyUpdate(body);
+  }
+
+  /**
+   * High-Intent Google Search Tool 1: True Landing Cost, Hidden Charges, Carpet Loading & NRI TDS X-Ray.
+   */
+  @Post('tools/true-cost')
+  calculateTrueCost(@Body() body: TrueCostInput) {
+    const breakdown = this.buyerTools.calculateTrueCost({
+      city: body.city === 'Dubai' ? 'Dubai' : 'Mumbai',
+      agreementPriceCroreInr: Number(body.agreementPriceCroreInr || 30),
+      advertisedSqFt: Number(body.advertisedSqFt || 4200),
+      reraCarpetSqFt: Number(body.reraCarpetSqFt || 2800),
+      isUnderConstruction: Boolean(body.isUnderConstruction),
+      isNriTransaction: Boolean(body.isNriTransaction),
+    });
+    this.db.recordFunnelEvent('true_cost_xray_used', 'tools_session');
+    return { ok: true, breakdown };
+  }
+
+  /**
+   * High-Intent Google Search Tool 2: Live Gemini 4 Builder-Buyer Agreement & Broker Pitch Red-Flag Scanner.
+   */
+  @Post('tools/scan-agreement')
+  async scanAgreement(@Body() body: { text: string; city?: 'Mumbai' | 'Dubai' }) {
+    const scan = await this.buyerTools.scanAgreementOrPitch(
+      body.text || '',
+      body.city === 'Dubai' ? 'Dubai' : 'Mumbai'
+    );
+    this.db.recordFunnelEvent('agreement_scanner_used', 'tools_session');
+    return { ok: true, scan };
   }
 }
