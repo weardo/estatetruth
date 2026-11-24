@@ -26,7 +26,7 @@ import {
   Inter_500Medium,
   Inter_600SemiBold,
 } from '@expo-google-fonts/inter';
-import { ESTATETRUTH_TOKENS as T } from '../../packages/design-tokens';
+import { ESTATETRUTH_TOKENS as T } from './tokens';
 
 const API_BASE_LAN = 'http://192.168.1.53:4000/api';
 const API_FALLBACK_EDGE = 'https://demos.soupup.ai/api/estatetruth/query';
