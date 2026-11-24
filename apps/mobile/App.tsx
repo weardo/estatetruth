@@ -276,6 +276,10 @@ function EstateTruthMain() {
   const [discoverBusy, setDiscoverBusy] = useState(false);
   const [discoverMsg, setDiscoverMsg] = useState('');
 
+  // Live Autocomplete Recommendations (Indexed + Unindexed Worldwide Places)
+  const [topSuggestions, setTopSuggestions] = useState<any[]>([]);
+  const [envSuggestions, setEnvSuggestions] = useState<any[]>([]);
+
   // Android Hardware Back Button Handling (Prevents accidental app exit!)
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -555,6 +559,38 @@ function EstateTruthMain() {
     if (data?.comparison) setGlobalResult(data.comparison);
     setGlobalLoading(false);
   };
+
+  useEffect(() => {
+    const q = searchBarText.trim();
+    if (q.length < 2) {
+      setTopSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await apiCall(
+        `/places/suggest?q=${encodeURIComponent(q)}&mode=all`,
+        `/places/suggest?q=${encodeURIComponent(q)}&mode=all`
+      );
+      if (Array.isArray(res?.suggestions)) setTopSuggestions(res.suggestions.slice(0, 5));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchBarText]);
+
+  useEffect(() => {
+    const q = envQuery.trim();
+    if (activeTab !== 'tools' || toolTab !== 'neighborhood' || q.length < 2) {
+      setEnvSuggestions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await apiCall(
+        `/places/suggest?q=${encodeURIComponent(q)}&mode=places`,
+        `/places/suggest?q=${encodeURIComponent(q)}&mode=places`
+      );
+      if (Array.isArray(res?.suggestions)) setEnvSuggestions(res.suggestions.slice(0, 5));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [envQuery, activeTab, toolTab]);
 
   useEffect(() => {
     if (activeTab === 'tools') {
@@ -846,6 +882,46 @@ function EstateTruthMain() {
                 <Text style={styles.fxPillTxt}>{currency}</Text>
               </Pressable>
             </View>
+
+            {/* Live Worldwide & Verified Recommendations Dropdown */}
+            {topSuggestions.length > 0 && (
+              <View style={{ marginHorizontal: 18, marginTop: 8, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: T.colors.border, overflow: 'hidden' }}>
+                {topSuggestions.map((s: any) => (
+                  <Pressable
+                    key={s.id}
+                    onPress={() => {
+                      setTopSuggestions([]);
+                      setSearchBarText('');
+                      if (s.kind === 'property' && s.targetId) {
+                        const found = properties.find((p) => p.id === s.targetId);
+                        if (found) {
+                          setSelectedProperty(found);
+                          return;
+                        }
+                      }
+                      if (s.kind === 'scheme') {
+                        setToolTab('schemes');
+                        setActiveTab('tools');
+                        return;
+                      }
+                      setEnvQuery(s.fullQuery);
+                      setToolTab('neighborhood');
+                      setActiveTab('tools');
+                      runLiveNeighborhood(s.fullQuery);
+                    }}
+                    style={{ paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.colors.hairline, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.h3} numberOfLines={1}>{s.label}</Text>
+                      <Text style={styles.caption} numberOfLines={1}>{s.subtitle}</Text>
+                    </View>
+                    <Text style={s.indexed ? styles.verifiedTag : styles.captionBold}>
+                      {s.indexed ? 'VERIFIED' : 'LIVE MAP'}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
 
             {/* Horizontal Airbnb Category Filter Strip */}
             <ScrollView
@@ -1280,10 +1356,28 @@ function EstateTruthMain() {
                   <TextInput
                     value={envQuery}
                     onChangeText={setEnvQuery}
-                    placeholder="e.g. Pali Hill Bandra West Mumbai"
+                    placeholder="Type any street, tower, or unindexed neighborhood…"
                     placeholderTextColor={T.colors.inkMuted}
                     style={styles.inputBox}
                   />
+                  {envSuggestions.length > 0 && (
+                    <View style={{ borderRadius: 12, borderWidth: 1, borderColor: T.colors.border, overflow: 'hidden' }}>
+                      {envSuggestions.map((s: any) => (
+                        <Pressable
+                          key={s.id}
+                          onPress={() => {
+                            setEnvQuery(s.fullQuery);
+                            setEnvSuggestions([]);
+                            runLiveNeighborhood(s.fullQuery);
+                          }}
+                          style={{ paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: T.colors.hairline, backgroundColor: '#FAFAFA' }}
+                        >
+                          <Text style={styles.h3} numberOfLines={1}>{s.label}</Text>
+                          <Text style={styles.caption} numberOfLines={1}>{s.subtitle}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                   <Pressable
                     onPress={() => runLiveNeighborhood()}
                     disabled={envLoading}

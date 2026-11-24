@@ -575,3 +575,154 @@ export async function compareGlobalCitiesEdge(
     },
   };
 }
+
+// =========================================================================
+// ENGINE 3: LIVE WORLDWIDE PLACE & BUILDING AUTOCOMPLETE (PHOTON + NOMINATIM)
+// Covers ANY neighborhood, street, landmark, or unindexed building globally!
+// =========================================================================
+
+export interface PlaceSuggestion {
+  id: string;
+  label: string;
+  subtitle: string;
+  fullQuery: string;
+  kind: 'property' | 'scheme' | 'global_pair' | 'live_place';
+  placeType?: string;
+  lat?: number;
+  lng?: number;
+  indexed: boolean;
+  targetId?: string;
+}
+
+export async function fetchLivePlaceSuggestions(query: string, limit = 6): Promise<PlaceSuggestion[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const dedupe = new Set<string>();
+  const results: PlaceSuggestion[] = [];
+
+  // 1. Primary: Komoot Photon API (fast OpenStreetMap search-as-you-type engine)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(
+      `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${Math.min(10, limit + 4)}&lang=en`,
+      {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'LensRoof/2.0 (https://lensroof.com)' },
+      }
+    );
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        features?: Array<{
+          properties?: {
+            osm_id?: number;
+            name?: string;
+            street?: string;
+            district?: string;
+            locality?: string;
+            city?: string;
+            county?: string;
+            state?: string;
+            country?: string;
+            osm_value?: string;
+            type?: string;
+          };
+          geometry?: { coordinates?: [number, number] };
+        }>;
+      };
+
+      for (const f of data.features || []) {
+        const p = f.properties || {};
+        const label = (p.name || p.street || p.locality || p.city || '').trim();
+        if (!label) continue;
+
+        const subParts: string[] = [];
+        for (const part of [p.district, p.city || p.county, p.state, p.country]) {
+          if (part && part.toLowerCase() !== label.toLowerCase() && !subParts.includes(part)) {
+            subParts.push(part);
+          }
+        }
+        const subtitle = subParts.join(', ');
+        const key = `${label.toLowerCase()}|${subtitle.toLowerCase()}`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+
+        const coords = f.geometry?.coordinates;
+        const lng = coords ? Number(coords[0].toFixed(5)) : undefined;
+        const lat = coords ? Number(coords[1].toFixed(5)) : undefined;
+        const fullQuery = subtitle ? `${label}, ${subtitle}` : label;
+
+        results.push({
+          id: `osm_${p.osm_id || results.length}_${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          label,
+          subtitle: subtitle || 'Worldwide Location',
+          fullQuery,
+          kind: 'live_place',
+          placeType: p.osm_value || p.type || 'place',
+          lat,
+          lng,
+          indexed: false,
+        });
+
+        if (results.length >= limit) break;
+      }
+    }
+  } catch {
+    // fall through to Nominatim fallback
+  }
+
+  if (results.length > 0) return results;
+
+  // 2. Fallback: OpenStreetMap Nominatim Search
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=${limit}&addressdetails=1`,
+      {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'LensRoof/2.0 (https://lensroof.com)' },
+      }
+    );
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const items = (await res.json()) as Array<{
+        place_id?: number;
+        display_name?: string;
+        name?: string;
+        lat?: string;
+        lon?: string;
+        type?: string;
+      }>;
+      for (const item of items || []) {
+        const parts = (item.display_name || '').split(',').map((s) => s.trim()).filter(Boolean);
+        const label = (item.name || parts[0] || '').trim();
+        if (!label) continue;
+        const subtitle = parts.slice(1, 4).join(', ');
+        const key = `${label.toLowerCase()}|${subtitle.toLowerCase()}`;
+        if (dedupe.has(key)) continue;
+        dedupe.add(key);
+
+        results.push({
+          id: `nom_${item.place_id || results.length}`,
+          label,
+          subtitle: subtitle || 'Worldwide Location',
+          fullQuery: subtitle ? `${label}, ${subtitle}` : label,
+          kind: 'live_place',
+          placeType: item.type || 'place',
+          lat: item.lat ? Number(Number(item.lat).toFixed(5)) : undefined,
+          lng: item.lon ? Number(Number(item.lon).toFixed(5)) : undefined,
+          indexed: false,
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return results;
+}

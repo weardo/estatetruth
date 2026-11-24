@@ -12,7 +12,9 @@ import {
   LIVE_GOVT_SCHEMES,
   simulateGovtSchemeStack,
   compareGlobalCitiesEdge,
+  fetchLivePlaceSuggestions,
   GlobalCityKey,
+  PlaceSuggestion,
   SchemeSimulationInput,
 } from './modules/tools/lensroof-engines';
 
@@ -506,5 +508,78 @@ export class AppController {
     );
     this.db.recordFunnelEvent('global_compare_used', 'global_session');
     return { ok: true, comparison };
+  }
+
+  /**
+   * Live Worldwide Place, Neighborhood & Unindexed Building Autocomplete (Photon + Nominatim + Local Index)
+   */
+  @Get('places/suggest')
+  async suggestPlaces(@Query('q') qRaw?: string, @Query('mode') mode?: string) {
+    const q = (qRaw || '').trim();
+    if (q.length < 2) return { ok: true, query: q, suggestions: [] };
+
+    const qLower = q.toLowerCase();
+    const indexedMatches: PlaceSuggestion[] = [];
+
+    if (mode !== 'places') {
+      for (const p of this.search.getCorpus()) {
+        if (
+          p.canonicalName.toLowerCase().includes(qLower) ||
+          p.microMarket.toLowerCase().includes(qLower) ||
+          p.developer.toLowerCase().includes(qLower) ||
+          p.reraId.toLowerCase().includes(qLower)
+        ) {
+          indexedMatches.push({
+            id: `prop_${p.id}`,
+            label: p.canonicalName,
+            subtitle: `${p.microMarket.replace(/\s*\(Live OSM #[0-9]+\)/i, '')}, ${p.city} · ${
+              p.activeReraLitigations === 0 ? 'Verified Clean' : `${p.activeReraLitigations} RERA cases`
+            }`,
+            fullQuery: `${p.canonicalName}, ${p.microMarket}, ${p.city}`,
+            kind: 'property',
+            lat: p.lat,
+            lng: p.lng,
+            indexed: true,
+            targetId: p.id,
+          });
+          if (indexedMatches.length >= 3) break;
+        }
+      }
+
+      for (const s of LIVE_GOVT_SCHEMES) {
+        if (
+          s.name.toLowerCase().includes(qLower) ||
+          s.authority.toLowerCase().includes(qLower) ||
+          s.stateOrRegion.toLowerCase().includes(qLower) ||
+          s.slug.includes(qLower)
+        ) {
+          indexedMatches.push({
+            id: `scheme_${s.slug}`,
+            label: s.name,
+            subtitle: `${s.stateOrRegion} · ${s.maxBenefitHeadline}`,
+            fullQuery: s.name,
+            kind: 'scheme',
+            indexed: true,
+            targetId: s.slug,
+          });
+          if (indexedMatches.length >= 5) break;
+        }
+      }
+    }
+
+    const cacheKey = `suggest_v1:${qLower}`;
+    let livePlaces = this.db.getCached<PlaceSuggestion[]>(cacheKey);
+    if (!livePlaces) {
+      livePlaces = await fetchLivePlaceSuggestions(q, mode === 'places' ? 6 : 5);
+      if (livePlaces.length > 0) {
+        this.db.setCached(cacheKey, 'places_suggest', livePlaces, 86400);
+      }
+    }
+
+    return {
+      ok: true,
+      query: q,
+      suggestions: [...indexedMatches, ...livePlaces],
+    };
   }
 }
