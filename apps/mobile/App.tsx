@@ -29,7 +29,7 @@ import {
 import { ESTATETRUTH_TOKENS as T } from './tokens';
 
 const API_BASE_LAN = 'http://192.168.1.53:4000/api';
-const API_EDGE_BASE = 'https://demos.soupup.ai/api/estatetruth';
+const API_EDGE_BASE = 'https://lensroof.com/api/estatetruth';
 const USER_ID = 'android_hni_client';
 
 interface EvidenceItem {
@@ -1262,10 +1262,10 @@ function EstateTruthMain() {
                   {(tractionData?.traction?.metrics?.paidIntentRevenueInr ?? 0).toLocaleString()}
                 </Text>
                 <Pressable
-                  onPress={() => Linking.openURL('https://demos.soupup.ai/sitemap.xml')}
+                  onPress={() => Linking.openURL('https://lensroof.com/sitemap.xml')}
                   style={styles.darkBtnFull}
                 >
-                  <Text style={styles.rauschBtnTxt}>Open Google SEO Sitemap (/sitemap.xml) →</Text>
+                  <Text style={styles.rauschBtnTxt}>Open Google SEO Sitemap (lensroof.com/sitemap.xml) →</Text>
                 </Pressable>
                 {(tractionData?.competitorMatrix || []).map((c: any, idx: number) => (
                   <View key={idx} style={styles.grayCard}>
