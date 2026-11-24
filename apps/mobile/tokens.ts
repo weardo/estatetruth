@@ -1,29 +1,36 @@
 /**
  * EstateTruth — Single Source of Truth Cross-Platform Design Tokens
- * Aesthetic: Aman Resorts Editorial Alabaster × CRED Tactile Mechanical Precision
- * Shared identically across Web (React) and Mobile (Expo React Native).
+ * Aesthetic: Airbnb Design Language System (DLS) — Pure White, Rausch Coral,
+ * Warm Charcoal Ink, Soft Ambient Shadows, Pill Search & High-Trust Photo Cards.
+ * Shared identically across Web (React) and Mobile (Expo SDK 58 React Native).
  */
 export const ESTATETRUTH_TOKENS = {
   colors: {
-    canvas: '#F4F0E8',         // Warm Museum Alabaster (replaces dark AI-slop SaaS)
-    surface: '#FAF8F3',        // Ivory Vellum card / ledger surface
-    surfaceMuted: '#EAE4D8',   // Recessed Parchment for spec wells
-    ink: '#141311',            // Primary Deep Espresso Ink
-    inkSecondary: '#5C574F',   // Muted Architectural Stone
-    inkMuted: '#8B8479',       // Hairline captions & lot metadata
-    hairline: '#D6CFC2',       // 1px editorial rule
-    inkBorder: '#141311',      // Sharp Neo-Editorial mechanical border
-    brass: '#9A7B4F',          // Brushed Antique Brass (lot numbers & active accents)
-    forest: '#1B4D3E',         // Verified Clean Ink
-    forestTint: '#E6EFEA',     // Quiet Verified wash
-    oxblood: '#8C2323',        // Red Flag / Litigation Ink
-    oxbloodTint: '#F5E6E6',    // Quiet Red Flag wash
-    vaultBg: '#141311',        // High-contrast tactile Obsidian footer / advisor accent
-    vaultText: '#F4F0E8',      // Crisp Alabaster on Obsidian
+    canvas: '#FFFFFF',         // Pure Crisp White Airbnb Canvas
+    surface: '#FFFFFF',        // Elevated White Card Surface
+    surfaceMuted: '#F7F7F7',   // Soft Neutral Well / Pill Fill
+    ink: '#222222',            // Primary Warm Charcoal (Airbnb Hof)
+    inkSecondary: '#484848',   // Secondary Body Charcoal
+    inkMuted: '#717171',       // Muted Caption Gray (Airbnb Foggy)
+    hairline: '#EBEBEB',       // Crisp 1px Section Divider
+    border: '#DDDDDD',         // Interactive Card & Input Border
+    borderDark: '#B0B0B0',     // Active / Form Input Border
+    rausch: '#FF385C',         // Signature Airbnb Rausch Coral
+    rauschDark: '#E31C5F',     // Pressed / Gradient End Coral
+    rauschTint: '#FFF0F3',     // Subtle Rausch Highlight Wash
+    verified: '#008A05',       // Verified Clean / Zero Litigation Green
+    verifiedTint: '#EDF7ED',   // Soft Verified Wash
+    danger: '#C13515',         // Red Flag / RERA Risk Crimson
+    dangerTint: '#FFF5F3',     // Soft Alert Wash
+    warning: '#E07912',        // Moderate Caution Amber
+    darkBar: '#222222',        // High-Contrast Button / Badge Surface
   },
   radii: {
-    none: 0,                   // Architectural 0px frames for photos & ledger sheets
-    hair: 2,                   // Subtle mechanical press button bevel
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+    pill: 9999,
   },
   spacing: {
     xs: 6,
@@ -33,10 +40,6 @@ export const ESTATETRUTH_TOKENS = {
     xl: 40,
   },
   typography: {
-    serifRegular: 'CormorantGaramond_400Regular',
-    serifMedium: 'CormorantGaramond_500Medium',
-    serifSemiBold: 'CormorantGaramond_600SemiBold',
-    serifItalic: 'CormorantGaramond_500Medium_Italic',
     sansRegular: 'Inter_400Regular',
     sansMedium: 'Inter_500Medium',
     sansSemiBold: 'Inter_600SemiBold',

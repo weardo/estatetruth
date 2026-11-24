@@ -323,4 +323,36 @@ export class AppController {
     this.db.recordFunnelEvent('agreement_scanner_used', 'tools_session');
     return { ok: true, scan };
   }
+
+  /**
+   * Live Integration 1: Real-Time Neighborhood AQI, Elevation/Flood Watch, Weather & Nearby OSM POIs for ANY address.
+   */
+  @Post('tools/live-neighborhood')
+  async liveNeighborhood(@Body() body: { address: string }) {
+    const audit = await this.buyerTools.auditLiveNeighborhood(body.address || 'Worli Sea Face Mumbai');
+    this.db.recordFunnelEvent('live_neighborhood_audit', 'tools_session');
+    return { ok: true, audit };
+  }
+
+  /**
+   * Live Integration 2: MahaRERA & Dubai DLD Registration Number Decoder & Statutory Verifier.
+   */
+  @Post('tools/verify-registry')
+  verifyRegistry(@Body() body: { registrationId: string }) {
+    const verification = this.buyerTools.verifyRegistry(
+      body.registrationId || '',
+      this.search.getCorpus()
+    );
+    this.db.recordFunnelEvent('registry_verifier_used', 'tools_session');
+    return { ok: true, verification };
+  }
+
+  /**
+   * Live Integration 3: Real-Time Market FX Rates (USD / INR / AED / GBP / EUR).
+   */
+  @Get('tools/fx-rates')
+  async getFxRates() {
+    const rates = await this.buyerTools.getLiveFxRates();
+    return { ok: true, rates };
+  }
 }
