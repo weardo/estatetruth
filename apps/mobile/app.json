@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "EstateTruth AI",
+    "slug": "estatetruth-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#070709",
+    "splash": {
+      "backgroundColor": "#070709"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.soupup.estatetruth"
+    },
+    "android": {
+      "package": "ai.soupup.estatetruth",
+      "adaptiveIcon": {
+        "backgroundColor": "#070709"
+      }
+    }
+  }
+}
